@@ -32,3 +32,16 @@ priority = "explicit"
 [tool.poetry.dependencies]
 torch = {source = "pytorch-cpu"}
 torchvision = {source = "pytorch-cpu"}
+
+[dependency-groups]
+dev = [
+    "ruff (>=0.17.1,<0.18.0)"
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

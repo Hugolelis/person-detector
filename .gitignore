@@ -1,0 +1,12 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Pytest cache
+.pytest_cache/
+
+# Model weights auto-downloaded by Ultralytics (e.g. yolov8n.pt)
+*.pt
+
+# Pipeline-generated outputs (graph, CSVs, violation clips)
+outputs/
