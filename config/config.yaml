@@ -1,0 +1,16 @@
+roi:
+  - [120, 80]
+  - [400, 80]
+  - [400, 300]
+  - [120, 300]
+
+person_limit: 5
+
+violation:
+  frames_to_confirm_start: 10
+  frames_to_confirm_end: 10
+  cooldown_frames: 15
+
+clip:
+  seconds_before: 5
+  seconds_after: 5
