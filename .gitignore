@@ -5,6 +5,9 @@ __pycache__/
 # Pytest cache
 .pytest_cache/
 
+# Ruff cache
+.ruff_cache/
+
 # Model weights auto-downloaded by Ultralytics (e.g. yolov8n.pt)
 *.pt
 
