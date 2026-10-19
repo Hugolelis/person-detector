@@ -1,0 +1,34 @@
+[project]
+name = "person-detector"
+version = "0.1.0"
+description = "Redzone people detector with YOLO"
+authors = [
+    {name = "Hugolelis",email = "hugodelelis05@gmail.com"}
+]
+license = "MIT"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "torch (>=2.14.1,<3.0.0)",
+    "torchvision (>=0.29.1,<0.30.0)",
+    "ultralytics (>=8.4.182,<9.0.0)",
+    "opencv-python (>=5.0.0.93,<6.0.0.0)",
+    "matplotlib (>=3.11.2,<4.0.0)",
+    "pyyaml (>=6.0.3,<7.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+packages = [{include = "src"}]
+
+[[tool.poetry.source]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+priority = "explicit"
+
+[tool.poetry.dependencies]
+torch = {source = "pytorch-cpu"}
+torchvision = {source = "pytorch-cpu"}
