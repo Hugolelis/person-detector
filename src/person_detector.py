@@ -1,3 +1,4 @@
+from src.errors.model import ModelLoadError
 from ultralytics import YOLO
 
 PERSON_CLASS_ID = 0
@@ -6,7 +7,10 @@ PERSON_CLASS_ID = 0
 class PersonDetector:
     def __init__(self, model_path: str = "yolov8n.pt", conf: float = 0.4):
         self.conf = conf
-        self.model = YOLO(model_path)
+        try:
+            self.model = YOLO(model_path)
+        except Exception as e:
+            raise ModelLoadError(f"Could not load model: {model_path}") from e
 
     def detect(self, frame):
         """Detect people in a frame.
