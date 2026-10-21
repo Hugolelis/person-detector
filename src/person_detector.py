@@ -24,9 +24,7 @@ class PersonDetector:
         boxes = results[0].boxes
 
         detections = []
-        for xyxy, conf in zip(
-            boxes.xyxy.tolist(), boxes.conf.tolist(), strict=True
-        ):
+        for xyxy, conf in zip(boxes.xyxy.tolist(), boxes.conf.tolist(), strict=True):
             x1, y1, x2, y2 = xyxy
             detections.append((x1, y1, x2, y2, conf))
         return detections
