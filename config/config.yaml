@@ -16,5 +16,5 @@ violation:
   cooldown_frames: 15
 
 clip:
-  seconds_before: 5
-  seconds_after: 5
+  seconds_before: 2
+  seconds_after: 3
