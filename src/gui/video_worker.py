@@ -16,6 +16,7 @@ class FrameUpdate:
     count: int
     time_s: float
     in_violation: bool
+    depth_frame: object = None
 
 
 def shrink_for_display(frame):
@@ -81,6 +82,11 @@ class VideoWorker(QThread):
                         count=result.count,
                         time_s=time_s,
                         in_violation=result.in_violation,
+                        depth_frame=(
+                            None
+                            if result.depth_frame is None
+                            else shrink_for_display(result.depth_frame)
+                        ),
                     )
                     self.frame_ready.emit(update)
             if processed:

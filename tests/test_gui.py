@@ -1,3 +1,4 @@
+import sys
 import time
 
 import cv2
@@ -5,6 +6,7 @@ import numpy as np
 import pytest
 import yaml
 from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QPixmap
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from src.config_loader import save_config
@@ -349,3 +351,110 @@ def test_stop_ends_a_video_file_run_early(app, window, monkeypatch):
     window.stop_button.click()
     assert wait_until(app, lambda: not window._is_running())
     assert len(points) < FRAMES
+
+
+def test_depth_panel_follows_the_checkbox_and_is_off_by_default(window):
+    assert not window.depth_check.isChecked()
+    assert not window.depth_label.isVisible()
+    window.depth_check.setChecked(True)
+    assert window.depth_label.isVisible()
+
+
+def test_the_checkbox_is_locked_while_processing(app, window):
+    window.start_button.click()
+    assert not window.depth_check.isEnabled()
+    assert wait_until(app, lambda: "finished" in window.fps_label.text())
+    assert window.depth_check.isEnabled()
+
+
+def test_depth_choice_goes_to_the_run_but_not_to_the_saved_config(window):
+    window.depth_check.setChecked(True)
+    assert window._run_config()["depth"]["enabled"] is True
+    assert "depth" not in window.config
+
+
+def test_processing_with_depth_fills_the_depth_panel(app, window, monkeypatch):
+    class FakeEstimator:
+        def __init__(self, *args):
+            pass
+
+        def estimate(self, frame):
+            return np.full(frame.shape[:2], 0.5, dtype=np.float32)
+
+    monkeypatch.setattr("src.pipeline.DepthEstimator", FakeEstimator)
+    monkeypatch.setattr(FakeDetector, "delay", 0.03)
+    window.config["depth"] = {"stride": 1}
+    window.depth_check.setChecked(True)
+    window.start_button.click()
+    assert wait_until(
+        app,
+        lambda: (
+            window.depth_label.pixmap() is not None
+            and not window.depth_label.pixmap().isNull()
+        ),
+    )
+    assert wait_until(app, lambda: not window._is_running())
+    assert "Error" not in window.status_label.text()
+    assert window.depth_label.text() == "The depth view starts with the processing."
+
+
+def test_a_missing_depth_package_is_reported_in_the_window(app, window, monkeypatch):
+    monkeypatch.setitem(sys.modules, "transformers", None)
+    window.depth_check.setChecked(True)
+    window.start_button.click()
+    assert wait_until(
+        app, lambda: "poetry add transformers" in window.status_label.text()
+    )
+    assert wait_until(app, lambda: not window._is_running())
+    assert "poetry add transformers" in window.status_label.text()
+    assert wait_until(app, lambda: "stopped" in window.fps_label.text())
+    assert "measuring" not in window.fps_label.text()
+
+
+def fits_the_label(label):
+    pixmap = label.pixmap()
+    return (
+        pixmap.width() <= label.width()
+        and pixmap.height() <= label.height()
+        and (pixmap.width() == label.width() or pixmap.height() == label.height())
+    )
+
+
+def test_the_image_is_refitted_when_the_depth_panel_opens(app, window):
+    app.processEvents()
+    assert fits_the_label(window.video_label)
+    before = window.video_label.width()
+    window.depth_check.setChecked(True)
+    app.processEvents()
+    assert window.video_label.width() < before
+    assert fits_the_label(window.video_label)
+
+
+def test_the_image_is_refitted_when_the_window_is_resized(app, window):
+    window.resize(1000, 700)
+    app.processEvents()
+    assert fits_the_label(window.video_label)
+    window.resize(1500, 950)
+    app.processEvents()
+    assert fits_the_label(window.video_label)
+
+
+def test_the_zone_keeps_its_place_on_the_image_after_a_resize(app, window):
+    window.edit_button.setChecked(True)
+    window.resize(1100, 750)
+    app.processEvents()
+    QTest.mouseClick(
+        window.video_label,
+        Qt.MouseButton.LeftButton,
+        pos=widget_position(window, 80, 60),
+    )
+    assert window.calibration_points[0] == pytest.approx((80, 60), abs=4)
+    assert fits_the_label(window.video_label)
+
+
+def test_showing_a_message_discards_the_old_image(app, empty_window):
+    empty_window.depth_label.show_image(QPixmap(40, 30))
+    empty_window.depth_label.setText("hello")
+    empty_window.depth_label.resize(300, 200)
+    app.processEvents()
+    assert empty_window.depth_label.text() == "hello"

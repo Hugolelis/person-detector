@@ -1,5 +1,5 @@
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QLabel
+from PySide6.QtWidgets import QLabel, QSizePolicy
 
 
 def widget_to_frame(x, y, widget_size, pixmap_size, frame_size):
@@ -21,7 +21,38 @@ class VideoLabel(QLabel):
     def __init__(self, text=""):
         super().__init__(text)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # The image must never decide the label size, or it would fight the layout.
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.click_frame_size = None
+        self._source = None
+
+    def show_image(self, pixmap):
+        """Show pixmap fitted to the label and keep it fitted when the label changes."""
+        self._source = pixmap
+        self._fit()
+
+    def _fit(self):
+        if self._source is None or self.width() < 2 or self.height() < 2:
+            return
+        self.setPixmap(
+            self._source.scaled(
+                self.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._fit()
+
+    def clear(self):
+        self._source = None
+        super().clear()
+
+    def setText(self, text):
+        self._source = None
+        super().setText(text)
 
     def mousePressEvent(self, event):
         pixmap = self.pixmap()

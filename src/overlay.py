@@ -6,6 +6,7 @@ BOX_COLOR = (0, 255, 0)
 ALERT_COLOR = (0, 0, 255)
 TEXT_COLOR = (255, 255, 255)
 POINT_COLOR = (0, 255, 255)
+CLOSEST_COLOR = (255, 0, 255)
 
 
 def _line_thickness(frame):
@@ -28,20 +29,25 @@ def draw_zone_preview(frame, points):
         cv2.polylines(frame, [polygon], len(points) >= 3, ZONE_COLOR, thickness)
 
 
-def draw_detections(frame, detections):
+def draw_detections(frame, detections, closest=None):
     thickness = _line_thickness(frame)
     font_scale = frame.shape[1] / 1536
-    for x1, y1, x2, y2, conf in detections:
+    for index, (x1, y1, x2, y2, conf) in enumerate(detections):
+        is_closest = index == closest
+        color = CLOSEST_COLOR if is_closest else BOX_COLOR
         top_left = (int(x1), int(y1))
         bottom_right = (int(x2), int(y2))
-        cv2.rectangle(frame, top_left, bottom_right, BOX_COLOR, thickness)
+        cv2.rectangle(
+            frame, top_left, bottom_right, color, thickness * (2 if is_closest else 1)
+        )
+        label = f"closest {conf:.2f}" if is_closest else f"{conf:.2f}"
         cv2.putText(
             frame,
-            f"{conf:.2f}",
+            label,
             (top_left[0], top_left[1] - thickness * 2),
             cv2.FONT_HERSHEY_SIMPLEX,
             font_scale,
-            BOX_COLOR,
+            color,
             thickness,
         )
 
@@ -77,9 +83,9 @@ def draw_alert(frame):
     )
 
 
-def draw_overlay(frame, detections, zone, count, limit, in_violation):
+def draw_overlay(frame, detections, zone, count, limit, in_violation, closest=None):
     draw_zone(frame, zone)
-    draw_detections(frame, detections)
+    draw_detections(frame, detections, closest)
     draw_counter(frame, count, limit)
     if in_violation:
         draw_alert(frame)

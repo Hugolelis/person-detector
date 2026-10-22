@@ -164,3 +164,103 @@ def test_overlap_percentage_from_the_config_decides_who_is_counted(tmp_path):
         with Pipeline(config, fps=10, run_dir=run_dir) as pipeline:
             counts[percent] = pipeline.process(make_frame(), 0).count
     assert counts == {40: 1, 60: 0}
+
+
+class FakeDepth:
+    """Stands in for DepthRunner: everything right of x=50 is closer."""
+
+    def __init__(self):
+        self.submitted = []
+        self.closed = False
+
+    def submit(self, frame):
+        self.submitted.append(frame.copy())
+
+    def latest(self):
+        depth = np.full((120, 160), 0.2, dtype=np.float32)
+        depth[:, 50:] = 0.9
+        return depth
+
+    def close(self):
+        self.closed = True
+
+
+def test_without_depth_there_is_no_depth_frame_or_closest_person(tmp_path):
+    with Pipeline(make_config(), fps=10, run_dir=tmp_path) as pipeline:
+        result = pipeline.process(make_frame(), 0)
+    assert result.depth_frame is None
+    assert result.closest is None
+
+
+def depth_config(confirm_frames):
+    config = make_config()
+    config["depth"] = {"closest_confirm_frames": confirm_frames}
+    return config
+
+
+def test_the_closest_person_is_found_from_the_depth_map(tmp_path):
+    config = depth_config(confirm_frames=1)
+    with Pipeline(config, fps=10, run_dir=tmp_path, depth=FakeDepth()) as pipeline:
+        result = pipeline.process(make_frame(), 0)
+    # DEFAULT_BOXES: the second person (x 60-70) stands in the closer part.
+    assert result.closest == 1
+    assert result.depth_frame.shape == (120, 160, 3)
+
+
+def test_the_closest_person_needs_five_frames_by_default(tmp_path):
+    with Pipeline(
+        make_config(), fps=10, run_dir=tmp_path, depth=FakeDepth()
+    ) as pipeline:
+        closest = [pipeline.process(make_frame(), index).closest for index in range(6)]
+    assert closest == [None, None, None, None, 1, 1]
+
+
+def test_the_confirmation_frames_come_from_the_config(tmp_path):
+    config = depth_config(confirm_frames=3)
+    with Pipeline(config, fps=10, run_dir=tmp_path, depth=FakeDepth()) as pipeline:
+        closest = [pipeline.process(make_frame(), index).closest for index in range(4)]
+    assert closest == [None, None, 1, 1]
+
+
+def test_the_depth_model_receives_the_clean_frame(tmp_path):
+    depth = FakeDepth()
+    with Pipeline(make_config(), fps=10, run_dir=tmp_path, depth=depth) as pipeline:
+        pipeline.process(make_frame(), 0)
+    assert depth.submitted[0].max() == 0
+
+
+def test_closing_the_pipeline_closes_the_depth_runner(tmp_path):
+    depth = FakeDepth()
+    with Pipeline(make_config(), fps=10, run_dir=tmp_path, depth=depth):
+        pass
+    assert depth.closed
+
+
+def test_depth_is_off_unless_the_config_enables_it(tmp_path, monkeypatch):
+    built = []
+    monkeypatch.setattr(
+        "src.pipeline.DepthEstimator", lambda *args: built.append(args) or FakeDepth()
+    )
+    config = make_config()
+    config["depth"] = {"enabled": False}
+    with Pipeline(config, fps=10, run_dir=tmp_path) as pipeline:
+        assert pipeline.depth is None
+    assert built == []
+
+
+def test_the_config_can_enable_depth_with_its_settings(tmp_path, monkeypatch):
+    built = []
+
+    class FakeEstimator:
+        def __init__(self, *args):
+            built.append(args)
+
+        def estimate(self, frame):
+            return np.zeros(frame.shape[:2], dtype=np.float32)
+
+    monkeypatch.setattr("src.pipeline.DepthEstimator", FakeEstimator)
+    config = make_config()
+    config["depth"] = {"enabled": True, "model": "some/model", "input_size": 140}
+    with Pipeline(config, fps=10, run_dir=tmp_path) as pipeline:
+        assert pipeline.depth is not None
+    assert built == [("some/model", 140)]

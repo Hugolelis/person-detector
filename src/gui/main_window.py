@@ -5,6 +5,7 @@ import cv2
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
+    QCheckBox,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
@@ -28,6 +29,7 @@ from src.video_reader import VideoReader
 
 VIDEO_FILTER = "Videos (*.mp4 *.avi *.mov *.mkv *.m4v *.wmv *.webm);;All files (*)"
 DEFAULT_VIDEO_DIR = "videos"
+DEPTH_PLACEHOLDER = "The depth view starts with the processing."
 WEBCAM_INDEX = 0
 WEBCAM_WARMUP_FRAMES = 5
 
@@ -57,8 +59,11 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self):
         self.video_label = VideoLabel("Open a video to start.")
-        self.video_label.setMinimumSize(640, 360)
+        self.video_label.setMinimumSize(480, 270)
         self.video_label.clicked.connect(self.on_video_clicked)
+
+        self.depth_label = VideoLabel(DEPTH_PLACEHOLDER)
+        self.depth_label.setMinimumSize(480, 270)
 
         self.open_button = QPushButton("Open video...")
         self.open_button.clicked.connect(self.choose_video)
@@ -82,6 +87,12 @@ class MainWindow(QMainWindow):
 
         run_box = QGroupBox("Processing")
         run_layout = QVBoxLayout(run_box)
+        self.depth_check = QCheckBox("Depth view (closest person)")
+        self.depth_check.setChecked(
+            bool(self.config.get("depth", {}).get("enabled", False))
+        )
+        self.depth_check.toggled.connect(self.depth_label.setVisible)
+        run_layout.addWidget(self.depth_check)
         run_layout.addWidget(self.start_button)
         run_layout.addWidget(self.pause_button)
         run_layout.addWidget(self.stop_button)
@@ -126,6 +137,8 @@ class MainWindow(QMainWindow):
 
         top_row = QHBoxLayout()
         top_row.addWidget(self.video_label, stretch=1)
+        top_row.addWidget(self.depth_label, stretch=1)
+        self.depth_label.setVisible(self.depth_check.isChecked())
         top_row.addWidget(side_panel)
 
         self.chart = LiveChart(int(self.config["person_limit"]))
@@ -225,6 +238,7 @@ class MainWindow(QMainWindow):
         running = self._is_running()
         has_video = self.first_frame is not None
         self.open_button.setEnabled(not running)
+        self.depth_check.setEnabled(not running)
         self.webcam_button.setEnabled(not running)
         self.stop_button.setEnabled(running)
         self.start_button.setEnabled(has_video and not running)
@@ -243,7 +257,7 @@ class MainWindow(QMainWindow):
         self.chart.reset()
         self.chart.set_limit(int(self.config["person_limit"]))
         self.video_label.click_frame_size = None
-        self.worker = VideoWorker(self.source, self.config, run_dir)
+        self.worker = VideoWorker(self.source, self._run_config(), run_dir)
         self.worker.frame_ready.connect(self.on_frame)
         self.worker.error.connect(self.show_error)
         self.worker.finished.connect(self.on_finished)
@@ -253,6 +267,14 @@ class MainWindow(QMainWindow):
         self._update_fps_label("measuring...")
         self.worker.start()
         self._update_controls()
+
+    def _run_config(self):
+        """The saved config plus this run's depth switch, which is never written."""
+        depth = {
+            **self.config.get("depth", {}),
+            "enabled": self.depth_check.isChecked(),
+        }
+        return {**self.config, "depth": depth}
 
     def stop_processing(self):
         if self._is_running():
@@ -274,6 +296,8 @@ class MainWindow(QMainWindow):
 
     def on_frame(self, update):
         self.show_frame(update.frame)
+        if update.depth_frame is not None:
+            self.show_frame(update.depth_frame, self.depth_label)
         self.chart.add_point(update.time_s, update.count)
         self.fps_meter.tick(perf_counter())
         fps = self.fps_meter.current_fps()
@@ -281,20 +305,14 @@ class MainWindow(QMainWindow):
             describe_speed(fps, self.video_fps) if fps else "measuring..."
         )
 
-    def show_frame(self, frame):
+    def show_frame(self, frame, label=None):
+        label = label or self.video_label
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         height, width, channels = rgb.shape
         image = QImage(
             rgb.data, width, height, channels * width, QImage.Format.Format_RGB888
         )
-        pixmap = QPixmap.fromImage(image)
-        self.video_label.setPixmap(
-            pixmap.scaled(
-                self.video_label.size(),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-        )
+        label.show_image(QPixmap.fromImage(image))
 
     def show_error(self, message):
         self.status_label.setText(f"Error: {message}")
@@ -306,6 +324,8 @@ class MainWindow(QMainWindow):
             self._update_fps_label(
                 f"finished, {describe_speed(average, self.video_fps)}"
             )
+        else:
+            self._update_fps_label("stopped before the first frame")
         if not self.status_label.text().startswith("Error"):
             self.status_label.setText(f"Finished. Results in {self.worker.run_dir}")
         self.clear_view()
@@ -313,6 +333,8 @@ class MainWindow(QMainWindow):
 
     def clear_view(self):
         self.chart.reset()
+        self.depth_label.clear()
+        self.depth_label.setText(DEPTH_PLACEHOLDER)
         self._show_zone_preview(self.config["roi"])
 
     def toggle_calibration(self, checked):

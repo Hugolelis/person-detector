@@ -5,6 +5,19 @@ from time import perf_counter
 import cv2
 from src.chart import plot_occupancy
 from src.clip_recorder import ClipRecorder
+from src.closest_tracker import DEFAULT_CONFIRM_FRAMES, ClosestTracker
+from src.depth_estimator import (
+    DEFAULT_DEPTH_MODEL,
+    DEFAULT_INPUT_SIZE,
+    DepthEstimator,
+)
+from src.depth_runner import DepthRunner
+from src.depth_view import (
+    colorize_depth,
+    confirmed_first,
+    draw_ranking,
+    rank_by_closeness,
+)
 from src.enums.violation_event import ViolationEvent
 from src.metrics_logger import MetricsLogger
 from src.overlay import draw_overlay
@@ -23,10 +36,12 @@ class FrameResult:
     event: ViolationEvent | None
     in_violation: bool
     annotated_frame: object
+    depth_frame: object = None
+    closest: int | None = None
 
 
 class Pipeline:
-    def __init__(self, config, fps, run_dir, frame_width=None):
+    def __init__(self, config, fps, run_dir, frame_width=None, depth=None):
         self.run_dir = Path(run_dir)
         self.fps = fps
         self.limit = config["person_limit"]
@@ -68,6 +83,34 @@ class Pipeline:
             **({"width": recorder_width} if recorder_width else {}),
         )
         self.violation_count = 0
+        depth_settings = config.get("depth", {})
+        self.depth = depth or self._build_depth(depth_settings)
+        self.closest_tracker = ClosestTracker(
+            depth_settings.get("closest_confirm_frames", DEFAULT_CONFIRM_FRAMES)
+        )
+        self._depth_map = None
+        self._depth_background = None
+
+    @staticmethod
+    def _build_depth(settings):
+        if not settings.get("enabled", False):
+            return None
+        estimator = DepthEstimator(
+            settings.get("model", DEFAULT_DEPTH_MODEL),
+            settings.get("input_size", DEFAULT_INPUT_SIZE),
+        )
+        return DepthRunner(estimator, settings.get("stride", 10))
+
+    def _rank_by_depth(self, frame, detections):
+        """Submit the clean frame and rank people on the latest depth map, if any."""
+        self.depth.submit(frame)
+        depth_map = self.depth.latest()
+        if depth_map is None:
+            return None, []
+        if depth_map is not self._depth_map:
+            self._depth_map = depth_map
+            self._depth_background = colorize_depth(depth_map)
+        return depth_map, rank_by_closeness(depth_map, detections)
 
     def process(self, frame, frame_index, time_s=None):
         """Process one frame. time_s is its time in seconds in the stream.
@@ -87,8 +130,21 @@ class Pipeline:
         event = self.violation_detector.update(count)
         in_violation = self.violation_detector.in_violation
 
+        closest = None
+        depth_frame = None
+        if self.depth:
+            depth_map, ranking = self._rank_by_depth(frame, detections)
+            if depth_map is not None:
+                closest = self.closest_tracker.update(detections, ranking)
+                depth_frame = draw_ranking(
+                    self._depth_background.copy(),
+                    detections,
+                    confirmed_first(ranking, closest),
+                    closest,
+                )
+
         annotated = draw_overlay(
-            frame, detections, self.zone, count, self.limit, in_violation
+            frame, detections, self.zone, count, self.limit, in_violation, closest
         )
         self.recorder.add_frame(annotated, time_s)
 
@@ -105,7 +161,9 @@ class Pipeline:
         if event is ViolationEvent.ENDED:
             self.logger.end_violation(frame_index, time_s)
 
-        return FrameResult(detections, count, event, in_violation, annotated)
+        return FrameResult(
+            detections, count, event, in_violation, annotated, depth_frame, closest
+        )
 
     def plot_chart(self):
         plot_occupancy(
@@ -115,6 +173,8 @@ class Pipeline:
         )
 
     def close(self):
+        if self.depth:
+            self.depth.close()
         self.recorder.close()
         self.logger.close()
 

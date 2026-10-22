@@ -75,6 +75,7 @@ The same pipeline in the desktop window: live video with detections, live occupa
 
 | Capability | Description |
 |---|---|
+| **Depth view** | Optional second panel with a depth map. It ranks everyone by closeness (#1 is the closest) and highlights the closest person in both views |
 | **Zone-based counting** | A person counts when at least `counting.min_overlap_percent` of their bounding box area is inside the zone polygon (default 30%) |
 | **Debounce** | A violation starts after N consecutive frames above the limit, ends after M consecutive frames at or below it, with a cooldown between events |
 | **Clips with context** | Each violation is saved with seconds of video from before the event (circular buffer) and after it, with the overlay drawn on |
@@ -213,6 +214,8 @@ Click **Open video...** and pick a file from your computer (`--video PATH` opens
 
 The video plays with the detections, the chart grows below it, and **Pause** freezes and resumes the processing and **Stop** ends the run early. The side panel shows the fps of the source video and how fast it is actually being processed, in frames per second and as a multiple of real time. While **Edit zone** is active, left click on the video adds a point and right click removes the last one.
 
+**Depth view.** Tick *Depth view (closest person)* before **Start** to open a second panel next to the video. A depth model estimates, for each pixel, how near it is to the camera. Each person is ranked by the typical depth of the lower, central part of their box, and the closest one is drawn in magenta in both panels. The highlight only moves to someone else after they stay the closest for a few frames in a row, so it does not flicker. The depth is relative (it compares people within the same frame, it is not in meters) and it is estimated in the background every few frames, so it never slows the detection down. It needs the optional `transformers` package: `poetry add transformers`. The model downloads on first use.
+
 With the webcam the run has no end: press **Stop** when you are done. Times in the CSVs, the chart and the clips follow the real clock, so they stay correct even when processing is slower than the camera. Draw the zone again for the webcam (**Edit zone**), because the zone is stored in pixels of the source video and the camera usually has another resolution.
 
 ---
@@ -240,6 +243,11 @@ With the webcam the run has no end: press **Stop** when you are done. Times in t
 | `detection.stride` | *Optional.* Run YOLO every N frames and reuse the last boxes in between (default `1`). Counting and debounce still run on every frame |
 | `processing.width` | *Optional.* Frames wider than this are reduced once, on entry (default `1280`), and everything after runs at that size. `roi` stays in original-frame pixels and is scaled automatically. `0` keeps the original size |
 | `roi` | Zone polygon, a list of `[x, y]` points in the pixels of the original frame |
+| `depth.enabled` | *Optional.* Start with the depth view on. The window has a checkbox for it too, and the checkbox choice is never written to the file |
+| `depth.model` | *Optional.* Hugging Face depth model (default `depth-anything/Depth-Anything-V2-Small-hf`) |
+| `depth.stride` | *Optional.* Estimate depth on every N-th frame (default `10`) and reuse the last map in between |
+| `depth.closest_confirm_frames` | *Optional.* Frames in a row another person must be the closest before the highlight moves to them (default `5`). `1` switches at once |
+| `depth.input_size` | *Optional.* Short side of the image given to the depth model, a multiple of 14 (default `266`). Larger is more detailed and slower |
 | `counting.min_overlap_percent` | *Optional.* Percentage (0 to 100) of a person's box that must be inside the zone to count them (default `30`). `0` counts anyone touching the zone, `100` only people fully inside |
 | `person_limit` | A violation needs a count strictly **above** this value |
 | `violation.frames_to_confirm_start` | Consecutive frames above the limit to start a violation |

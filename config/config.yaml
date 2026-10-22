@@ -3,10 +3,10 @@ detection:
   confidence_threshold: 0.75
   threads: 4
 roi:
-- [97, 186]
-- [559, 142]
-- [608, 394]
-- [95, 442]
+- [206, 209]
+- [622, 157]
+- [621, 479]
+- [104, 470]
 person_limit: 3
 violation:
   frames_to_confirm_start: 10
@@ -17,3 +17,8 @@ clip:
   seconds_after: 3
 counting:
   min_overlap_percent: 30
+depth:
+  enabled: false
+  stride: 10
+  input_size: 266
+  closest_confirm_frames: 5
