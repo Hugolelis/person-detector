@@ -3,12 +3,12 @@ detection:
   confidence_threshold: 0.4
   
 roi:
-  - [120, 80]
-  - [400, 80]
-  - [400, 300]
-  - [120, 300]
+  - [1000, 600]
+  - [3500, 600]
+  - [3500, 2100]
+  - [1000, 2100]
 
-person_limit: 5
+person_limit: 2
 
 violation:
   frames_to_confirm_start: 10
