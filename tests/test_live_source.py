@@ -1,10 +1,10 @@
 import cv2
 import numpy as np
 import pytest
-from src.clip_recorder import ClipRecorder
 from src.errors.video import VideoOpenError
-from src.run_dir import make_run_dir
-from src.video_reader import DEFAULT_LIVE_FPS, VideoReader
+from src.reporting.run_dir import make_run_dir
+from src.video.clip_recorder import ClipRecorder
+from src.video.reader import DEFAULT_LIVE_FPS, VideoReader
 from tests.test_pipeline import make_frame
 
 

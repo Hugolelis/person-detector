@@ -10,8 +10,8 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from src.config_loader import save_config
-from src.gui.live_chart import LiveChart
 from src.gui.main_window import MainWindow
+from src.gui.widgets.live_chart import LiveChart
 
 FRAMES = 24
 FPS = 10
@@ -115,12 +115,12 @@ def widget_position(window, frame_x, frame_y):
 
 def test_window_shows_the_source_video_fps(window):
     assert f"Source video: {FPS:.2f} fps" in window.fps_label.text()
-    assert window.start_button.isEnabled()
-    assert not window.pause_button.isEnabled()
+    assert window.run_panel.start_button.isEnabled()
+    assert not window.run_panel.pause_button.isEnabled()
 
 
 def test_zone_can_be_drawn_with_the_mouse_and_saved(window):
-    window.edit_button.setChecked(True)
+    window.zone_panel.edit_button.setChecked(True)
     targets = [(40, 30), (280, 40), (270, 200), (30, 210)]
     for frame_x, frame_y in targets:
         QTest.mouseClick(
@@ -138,10 +138,10 @@ def test_zone_can_be_drawn_with_the_mouse_and_saved(window):
         Qt.MouseButton.RightButton,
         pos=widget_position(window, 150, 120),
     )
-    assert len(window.calibration_points) == 4
+    assert len(window.zone_editor.points) == 4
 
-    window.limit_spin.setValue(3)
-    window.save_button.click()
+    window.zone_panel.limit_spin.setValue(3)
+    window.zone_panel.save_button.click()
 
     saved = yaml.safe_load(open(window.config_path))
     assert saved["person_limit"] == 3
@@ -153,19 +153,19 @@ def test_zone_can_be_drawn_with_the_mouse_and_saved(window):
         )
         <= 4
     )
-    assert not window.edit_button.isChecked()
+    assert not window.zone_panel.edit_button.isChecked()
 
 
 def test_a_zone_needs_at_least_three_points(window):
-    window.edit_button.setChecked(True)
-    window.save_button.click()
+    window.zone_panel.edit_button.setChecked(True)
+    window.zone_panel.save_button.click()
     assert "at least 3 points" in window.status_label.text()
 
 
 def test_processing_reports_the_speed_and_saves_the_results(app, window):
     points = record_chart_points(window)
-    window.start_button.click()
-    assert not window.start_button.isEnabled()
+    window.run_panel.start_button.click()
+    assert not window.run_panel.start_button.isEnabled()
     assert wait_until(app, lambda: "finished" in window.fps_label.text())
     assert not window._is_running()
     assert len(points) == FRAMES
@@ -178,12 +178,12 @@ def test_processing_reports_the_speed_and_saves_the_results(app, window):
 
 def test_view_is_cleared_when_the_video_ends(app, window):
     points = record_chart_points(window)
-    window.start_button.click()
+    window.run_panel.start_button.click()
     assert wait_until(app, lambda: "finished" in window.fps_label.text())
     assert len(points) == FRAMES
     assert window.chart.timestamps == []
     assert window.chart.counts == []
-    assert window.start_button.isEnabled()
+    assert window.run_panel.start_button.isEnabled()
 
 
 def test_clear_view_resets_the_chart_and_shows_the_first_frame(app, window):
@@ -198,10 +198,10 @@ def test_clear_view_resets_the_chart_and_shows_the_first_frame(app, window):
 def test_pause_stops_the_frames_and_resume_continues(app, window, monkeypatch):
     monkeypatch.setattr(FakeDetector, "delay", 0.05)
     points = record_chart_points(window)
-    window.start_button.click()
+    window.run_panel.start_button.click()
     assert wait_until(app, lambda: len(points) >= 2)
-    window.pause_button.click()
-    assert window.pause_button.text() == "Resume"
+    window.run_panel.pause_button.click()
+    assert window.run_panel.pause_button.text() == "Resume"
     assert "paused" in window.fps_label.text()
     time.sleep(0.3)
     app.processEvents()
@@ -209,14 +209,14 @@ def test_pause_stops_the_frames_and_resume_continues(app, window, monkeypatch):
     time.sleep(0.5)
     app.processEvents()
     assert len(points) == frozen
-    window.pause_button.click()
+    window.run_panel.pause_button.click()
     assert wait_until(app, lambda: not window._is_running())
     assert len(points) == FRAMES
 
 
 def test_closing_the_window_stops_the_worker(app, window):
     points = record_chart_points(window)
-    window.start_button.click()
+    window.run_panel.start_button.click()
     assert wait_until(app, lambda: len(points) >= 1)
     window.close()
     assert not window._is_running()
@@ -236,26 +236,26 @@ def test_chart_redraws_once_per_video_second(app):
 
 
 def test_window_can_start_without_a_video(empty_window):
-    assert not empty_window.start_button.isEnabled()
-    assert not empty_window.edit_button.isEnabled()
-    assert empty_window.open_button.isEnabled()
+    assert not empty_window.run_panel.start_button.isEnabled()
+    assert not empty_window.zone_panel.edit_button.isEnabled()
+    assert empty_window.source_panel.open_button.isEnabled()
     assert "Open a video" in empty_window.video_label.text()
 
 
 def test_choosing_a_video_loads_it_and_enables_processing(empty_window, tmp_path):
     other = write_video(tmp_path / "other.mp4", fps=25)
     empty_window._ask_video_path = lambda: other
-    empty_window.open_button.click()
+    empty_window.source_panel.open_button.click()
     assert empty_window.source == other
-    assert empty_window.video_name_label.text() == "other.mp4"
+    assert empty_window.source_panel.name_label.text() == "other.mp4"
     assert "Source video: 25.00 fps" in empty_window.fps_label.text()
-    assert empty_window.start_button.isEnabled()
+    assert empty_window.run_panel.start_button.isEnabled()
 
 
 def test_cancelling_the_dialog_keeps_the_current_video(window):
     current = window.source
     window._ask_video_path = lambda: ""
-    window.open_button.click()
+    window.source_panel.open_button.click()
     assert window.source == current
 
 
@@ -264,73 +264,73 @@ def test_an_invalid_file_keeps_the_current_video(window, tmp_path):
     broken.write_text("not a video")
     current = window.source
     window._ask_video_path = lambda: str(broken)
-    window.open_button.click()
+    window.source_panel.open_button.click()
     assert window.source == current
     assert "Error" in window.status_label.text()
-    assert window.start_button.isEnabled()
+    assert window.run_panel.start_button.isEnabled()
 
 
 def test_changing_video_clears_the_chart_and_leaves_zone_editing(window, tmp_path):
     other = write_video(tmp_path / "other.mp4")
-    window.edit_button.setChecked(True)
+    window.zone_panel.edit_button.setChecked(True)
     window.chart.add_point(0.0, 3)
     window._ask_video_path = lambda: other
-    window.open_button.click()
+    window.source_panel.open_button.click()
     assert window.chart.timestamps == []
-    assert not window.edit_button.isChecked()
+    assert not window.zone_panel.edit_button.isChecked()
 
 
 def test_the_video_cannot_be_changed_while_processing(app, window, tmp_path):
-    window.start_button.click()
-    assert not window.open_button.isEnabled()
+    window.run_panel.start_button.click()
+    assert not window.source_panel.open_button.isEnabled()
     other = write_video(tmp_path / "other.mp4")
     window._ask_video_path = lambda: other
     window.choose_video()
     assert window.source != other
     assert wait_until(app, lambda: "finished" in window.fps_label.text())
-    assert window.open_button.isEnabled()
+    assert window.source_panel.open_button.isEnabled()
 
 
 def test_results_folder_is_named_after_the_chosen_video(app, empty_window, tmp_path):
     other = write_video(tmp_path / "street.mp4")
     empty_window._ask_video_path = lambda: other
-    empty_window.open_button.click()
-    empty_window.start_button.click()
+    empty_window.source_panel.open_button.click()
+    empty_window.run_panel.start_button.click()
     assert wait_until(app, lambda: "finished" in empty_window.fps_label.text())
     assert empty_window.worker.run_dir.name.startswith("street_")
 
 
 def test_webcam_button_loads_a_live_source(empty_window, fake_camera):
-    empty_window.webcam_button.click()
+    empty_window.source_panel.webcam_button.click()
     assert empty_window.source == 0
     assert empty_window.is_live
-    assert "webcam" in empty_window.video_name_label.text().lower()
+    assert "webcam" in empty_window.source_panel.name_label.text().lower()
     assert "webcam" in empty_window.fps_label.text().lower()
-    assert empty_window.start_button.isEnabled()
+    assert empty_window.run_panel.start_button.isEnabled()
 
 
 def test_unavailable_webcam_shows_an_error_and_keeps_start_disabled(
     empty_window, fake_camera
 ):
     fake_camera.broken_indexes = {0}
-    empty_window.webcam_button.click()
+    empty_window.source_panel.webcam_button.click()
     assert "Could not open camera 0" in empty_window.status_label.text()
     assert empty_window.source is None
-    assert not empty_window.start_button.isEnabled()
+    assert not empty_window.run_panel.start_button.isEnabled()
 
 
 def test_webcam_runs_until_stop_and_uses_real_time(app, empty_window, fake_camera):
     fake_camera.delay = 0.06
-    empty_window.webcam_button.click()
+    empty_window.source_panel.webcam_button.click()
     points = record_chart_points(empty_window)
-    empty_window.start_button.click()
-    assert empty_window.stop_button.isEnabled()
-    assert not empty_window.webcam_button.isEnabled()
+    empty_window.run_panel.start_button.click()
+    assert empty_window.run_panel.stop_button.isEnabled()
+    assert not empty_window.source_panel.webcam_button.isEnabled()
     assert wait_until(app, lambda: len(points) >= 12)
     assert empty_window._is_running()
-    empty_window.stop_button.click()
+    empty_window.run_panel.stop_button.click()
     assert wait_until(app, lambda: "finished" in empty_window.fps_label.text())
-    assert not empty_window.stop_button.isEnabled()
+    assert not empty_window.run_panel.stop_button.isEnabled()
     assert empty_window.chart.timestamps == []
 
     run_dir = empty_window.worker.run_dir
@@ -346,29 +346,29 @@ def test_webcam_runs_until_stop_and_uses_real_time(app, empty_window, fake_camer
 def test_stop_ends_a_video_file_run_early(app, window, monkeypatch):
     monkeypatch.setattr(FakeDetector, "delay", 0.05)
     points = record_chart_points(window)
-    window.start_button.click()
+    window.run_panel.start_button.click()
     assert wait_until(app, lambda: len(points) >= 2)
-    window.stop_button.click()
+    window.run_panel.stop_button.click()
     assert wait_until(app, lambda: not window._is_running())
     assert len(points) < FRAMES
 
 
 def test_depth_panel_follows_the_checkbox_and_is_off_by_default(window):
-    assert not window.depth_check.isChecked()
+    assert not window.run_panel.depth_check.isChecked()
     assert not window.depth_label.isVisible()
-    window.depth_check.setChecked(True)
+    window.run_panel.depth_check.setChecked(True)
     assert window.depth_label.isVisible()
 
 
 def test_the_checkbox_is_locked_while_processing(app, window):
-    window.start_button.click()
-    assert not window.depth_check.isEnabled()
+    window.run_panel.start_button.click()
+    assert not window.run_panel.depth_check.isEnabled()
     assert wait_until(app, lambda: "finished" in window.fps_label.text())
-    assert window.depth_check.isEnabled()
+    assert window.run_panel.depth_check.isEnabled()
 
 
 def test_depth_choice_goes_to_the_run_but_not_to_the_saved_config(window):
-    window.depth_check.setChecked(True)
+    window.run_panel.depth_check.setChecked(True)
     assert window._run_config()["depth"]["enabled"] is True
     assert "depth" not in window.config
 
@@ -384,8 +384,8 @@ def test_processing_with_depth_fills_the_depth_panel(app, window, monkeypatch):
     monkeypatch.setattr("src.pipeline.DepthEstimator", FakeEstimator)
     monkeypatch.setattr(FakeDetector, "delay", 0.03)
     window.config["depth"] = {"stride": 1}
-    window.depth_check.setChecked(True)
-    window.start_button.click()
+    window.run_panel.depth_check.setChecked(True)
+    window.run_panel.start_button.click()
     assert wait_until(
         app,
         lambda: (
@@ -400,8 +400,8 @@ def test_processing_with_depth_fills_the_depth_panel(app, window, monkeypatch):
 
 def test_a_missing_depth_package_is_reported_in_the_window(app, window, monkeypatch):
     monkeypatch.setitem(sys.modules, "transformers", None)
-    window.depth_check.setChecked(True)
-    window.start_button.click()
+    window.run_panel.depth_check.setChecked(True)
+    window.run_panel.start_button.click()
     assert wait_until(
         app, lambda: "poetry add transformers" in window.status_label.text()
     )
@@ -424,7 +424,7 @@ def test_the_image_is_refitted_when_the_depth_panel_opens(app, window):
     app.processEvents()
     assert fits_the_label(window.video_label)
     before = window.video_label.width()
-    window.depth_check.setChecked(True)
+    window.run_panel.depth_check.setChecked(True)
     app.processEvents()
     assert window.video_label.width() < before
     assert fits_the_label(window.video_label)
@@ -440,7 +440,7 @@ def test_the_image_is_refitted_when_the_window_is_resized(app, window):
 
 
 def test_the_zone_keeps_its_place_on_the_image_after_a_resize(app, window):
-    window.edit_button.setChecked(True)
+    window.zone_panel.edit_button.setChecked(True)
     window.resize(1100, 750)
     app.processEvents()
     QTest.mouseClick(
@@ -448,7 +448,7 @@ def test_the_zone_keeps_its_place_on_the_image_after_a_resize(app, window):
         Qt.MouseButton.LeftButton,
         pos=widget_position(window, 80, 60),
     )
-    assert window.calibration_points[0] == pytest.approx((80, 60), abs=4)
+    assert window.zone_editor.points[0] == pytest.approx((80, 60), abs=4)
     assert fits_the_label(window.video_label)
 
 

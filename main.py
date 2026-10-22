@@ -4,7 +4,7 @@ import sys
 from src.config_loader import load_config
 from src.errors.base import PersonDetectorError
 from src.pipeline import run_pipeline
-from src.run_dir import make_run_dir
+from src.reporting.run_dir import make_run_dir
 
 
 def parse_args(video_required=True):

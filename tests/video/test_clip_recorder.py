@@ -2,7 +2,7 @@ import threading
 
 import cv2
 import numpy as np
-from src.clip_recorder import ClipRecorder
+from src.video.clip_recorder import ClipRecorder
 
 
 def test_frames_already_at_the_target_width_are_not_resized():

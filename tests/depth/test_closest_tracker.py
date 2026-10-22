@@ -1,4 +1,4 @@
-from src.closest_tracker import ClosestTracker, iou
+from src.depth.closest_tracker import ClosestTracker, iou
 
 A = (10, 10, 50, 90, 0.9)
 B = (100, 10, 140, 90, 0.9)

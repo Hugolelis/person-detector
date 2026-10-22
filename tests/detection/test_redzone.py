@@ -1,5 +1,5 @@
 import pytest
-from src.redzone import RedZone
+from src.detection.redzone import RedZone
 
 SQUARE = [[0, 0], [100, 0], [100, 100], [0, 100]]
 

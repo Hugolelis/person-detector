@@ -1,4 +1,6 @@
+import cv2
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QLabel, QSizePolicy
 
 
@@ -30,6 +32,15 @@ class VideoLabel(QLabel):
         """Show pixmap fitted to the label and keep it fitted when the label changes."""
         self._source = pixmap
         self._fit()
+
+    def show_frame(self, frame):
+        """Show an OpenCV (BGR) frame."""
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        height, width, channels = rgb.shape
+        image = QImage(
+            rgb.data, width, height, channels * width, QImage.Format.Format_RGB888
+        )
+        self.show_image(QPixmap.fromImage(image))
 
     def _fit(self):
         if self._source is None or self.width() < 2 or self.height() < 2:

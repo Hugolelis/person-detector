@@ -120,38 +120,49 @@ With **Depth view** on, a second panel shows a depth map next to the video. Ever
 
 ```
 .
-├── main.py                     CLI entry point
-├── gui.py                      desktop window entry point
-├── calibrate.py                command-line zone calibration
+├── main.py                       CLI entry point
+├── gui.py                        desktop window entry point
+├── calibrate.py                  command-line zone calibration
 ├── config/
 │   └── config.yaml
 ├── src/
-│   ├── pipeline.py             per-frame processing, shared by the CLI and the window
-│   ├── person_detector.py      YOLO wrapper
-│   ├── video_reader.py         video files and live cameras
-│   ├── redzone.py              zone polygon and box-overlap counting
-│   ├── violation.py            debounce state machine
-│   ├── clip_recorder.py        time-based circular buffer, clips written in a thread
-│   ├── depth_estimator.py      depth model wrapper and input preparation
-│   ├── depth_runner.py         depth estimation in a background thread
-│   ├── depth_view.py           people ranking by depth and the depth panel drawing
-│   ├── closest_tracker.py      keeps the closest person steady across frames
-│   ├── metrics_logger.py       CSV logging
-│   ├── overlay.py              drawing on frames
-│   ├── chart.py                occupancy chart
-│   ├── config_loader.py        YAML loading and saving
-│   ├── run_dir.py              output folder naming
-│   ├── errors/                 project exceptions
-│   ├── enums/                  shared enums
-│   └── gui/                    window, worker thread, live chart, video label, fps meter
+│   ├── pipeline.py               per-frame processing, shared by the CLI and the window
+│   ├── config_loader.py          YAML loading, validation and saving
+│   ├── calibration.py            zone drawing on a frame (command line)
+│   ├── detection/                what is decided about each frame
+│   │   ├── person_detector.py    YOLO wrapper
+│   │   ├── redzone.py            zone polygon and box-overlap counting
+│   │   └── violation.py          debounce state machine
+│   ├── depth/                    the closest-person view
+│   │   ├── estimator.py          depth model wrapper and input preparation
+│   │   ├── runner.py             depth estimation in a background thread
+│   │   ├── view.py               ranking people by depth and drawing the depth panel
+│   │   └── closest_tracker.py    keeps the closest person steady across frames
+│   ├── video/                    frames in and out
+│   │   ├── reader.py             video files and live cameras
+│   │   ├── overlay.py            drawing on frames
+│   │   └── clip_recorder.py      time-based circular buffer, clips written in a thread
+│   ├── reporting/                what a run leaves behind
+│   │   ├── metrics_logger.py     CSV logging
+│   │   ├── chart.py              occupancy chart
+│   │   └── run_dir.py            output folder naming
+│   ├── errors/                   project exceptions
+│   ├── enums/                    shared enums
+│   └── gui/
+│       ├── main_window.py        builds the window and connects the pieces
+│       ├── video_worker.py       processing thread
+│       ├── zone_editor.py        state of the zone being drawn
+│       ├── source_preview.py     file dialog and the preview frame of a source
+│       ├── fps_meter.py          speed measurement
+│       └── widgets/              video label, live chart, side panels, speed readout
 ├── scripts/
-│   └── tune_parameters.py      offline study of confidence and debounce
-├── tests/
-├── docs/                       README assets
-└── diagram/                    usage flow
+│   └── tune_parameters.py        offline study of confidence and debounce
+├── tests/                        mirrors the layout of src/
+├── docs/                         README assets
+└── diagram/                      usage flow
 ```
 
-**Why this shape:** the frame is reduced once, on entry, so detection, drawing, the clip buffer and the window all work at 1280 pixels wide instead of repeating 4K operations. `Pipeline.process` handles exactly one frame and returns the result, so the CLI loop and the window's worker thread share the same logic instead of duplicating it. The debounce lives in its own class that only sees integer counts, which makes it testable with made-up sequences and no model. No class reads the YAML on its own: the entry points load the config and hand plain values down, so everything can be tested without files. Errors derive from one base exception, so the entry points catch every expected failure in a single `except` and let real bugs surface with a full traceback. Counting uses the share of the box inside the zone instead of a single point, so a person half in and half out is not decided by one pixel. The default is a low 30% on purpose: the zone is drawn on the ground, so for someone standing inside it, only the lower part of their box overlaps it. Raise it to be stricter, lower it to count anyone touching the zone.
+**Why this shape:** the folders follow the question each piece answers: `detection` decides what is in a frame, `depth` ranks who is closest, `video` moves frames in and out, `reporting` writes what a run leaves behind. The window is split the same way: `main_window.py` only builds the layout and connects signals, while the panels, the speed readout, the zone editor state and the source preview each live in their own small module and can be tested without opening a window. The frame is reduced once, on entry, so detection, drawing, the clip buffer and the window all work at 1280 pixels wide instead of repeating 4K operations. `Pipeline.process` handles exactly one frame and returns the result, so the CLI loop and the window's worker thread share the same logic instead of duplicating it. The debounce lives in its own class that only sees integer counts, which makes it testable with made-up sequences and no model. No class reads the YAML on its own: the entry points load the config and hand plain values down, so everything can be tested without files. Errors derive from one base exception, so the entry points catch every expected failure in a single `except` and let real bugs surface with a full traceback. Counting uses the share of the box inside the zone instead of a single point, so a person half in and half out is not decided by one pixel. The default is a low 30% on purpose: the zone is drawn on the ground, so for someone standing inside it, only the lower part of their box overlaps it. Raise it to be stricter, lower it to count anyone touching the zone.
 
 Every frame carries its own time. For a file it is `frame / fps`; for a webcam it is measured on the clock, because processing is slower than the camera. The CSVs, the chart and the clips all use that time, and the clip recorder keeps *seconds* of video instead of a number of frames, so a clip made from a slow stream still plays at the speed it was recorded. Clips are encoded in a background thread, which removes the stall that dumping the pre-event buffer used to cause.
 

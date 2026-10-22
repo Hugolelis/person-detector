@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from src.video_reader import VideoReader
+from src.video.reader import VideoReader
 
 WINDOW_NAME = "Calibration"
 DISPLAY_WIDTH = 1280

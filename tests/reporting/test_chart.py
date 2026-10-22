@@ -1,6 +1,6 @@
 from matplotlib.colors import to_rgba
 from matplotlib.figure import Figure
-from src.chart import (
+from src.reporting.chart import (
     ALERT_COLOR,
     OK_COLOR,
     build_bars,

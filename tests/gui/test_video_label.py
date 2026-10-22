@@ -1,4 +1,4 @@
-from src.gui.video_label import widget_to_frame
+from src.gui.widgets.video_label import widget_to_frame
 
 FRAME_SIZE = (3840, 2160)
 PIXMAP_SIZE = (640, 360)

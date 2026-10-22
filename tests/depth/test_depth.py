@@ -3,13 +3,13 @@ import time
 
 import numpy as np
 import pytest
-from src.depth_estimator import (
+from src.depth.estimator import (
     DepthEstimator,
     normalize_depth,
     prepare_input,
 )
-from src.depth_runner import DepthRunner
-from src.depth_view import (
+from src.depth.runner import DepthRunner
+from src.depth.view import (
     HIGHLIGHT_COLOR,
     colorize_depth,
     person_depth,

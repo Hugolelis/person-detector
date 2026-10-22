@@ -3,28 +3,28 @@ from pathlib import Path
 from time import perf_counter
 
 import cv2
-from src.chart import plot_occupancy
-from src.clip_recorder import ClipRecorder
-from src.closest_tracker import DEFAULT_CONFIRM_FRAMES, ClosestTracker
-from src.depth_estimator import (
+from src.depth.closest_tracker import DEFAULT_CONFIRM_FRAMES, ClosestTracker
+from src.depth.estimator import (
     DEFAULT_DEPTH_MODEL,
     DEFAULT_INPUT_SIZE,
     DepthEstimator,
 )
-from src.depth_runner import DepthRunner
-from src.depth_view import (
+from src.depth.runner import DepthRunner
+from src.depth.view import (
     colorize_depth,
     confirmed_first,
     draw_ranking,
     rank_by_closeness,
 )
+from src.detection.person_detector import DEFAULT_THREADS, PersonDetector
+from src.detection.redzone import DEFAULT_MIN_OVERLAP_PERCENT, RedZone
+from src.detection.violation import ViolationDetector
 from src.enums.violation_event import ViolationEvent
-from src.metrics_logger import MetricsLogger
-from src.overlay import draw_overlay
-from src.person_detector import DEFAULT_THREADS, PersonDetector
-from src.redzone import DEFAULT_MIN_OVERLAP_PERCENT, RedZone
-from src.video_reader import VideoReader
-from src.violation import ViolationDetector
+from src.reporting.chart import plot_occupancy
+from src.reporting.metrics_logger import MetricsLogger
+from src.video.clip_recorder import ClipRecorder
+from src.video.overlay import draw_overlay
+from src.video.reader import VideoReader
 
 DEFAULT_WORKING_WIDTH = 1280
 

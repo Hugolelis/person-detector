@@ -15,11 +15,11 @@ import json
 from pathlib import Path
 
 from src.config_loader import load_config
+from src.detection.person_detector import PersonDetector
+from src.detection.redzone import RedZone
+from src.detection.violation import ViolationDetector
 from src.enums.violation_event import ViolationEvent
-from src.person_detector import PersonDetector
-from src.redzone import RedZone
-from src.video_reader import VideoReader
-from src.violation import ViolationDetector
+from src.video.reader import VideoReader
 
 CONFIDENCES = (0.25, 0.3, 0.4, 0.5, 0.6)
 DEBOUNCE_FRAMES = (3, 5, 10, 20)

@@ -1,37 +1,29 @@
-from pathlib import Path
-from time import perf_counter
-
-import cv2
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
-    QCheckBox,
-    QFileDialog,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QMainWindow,
-    QPushButton,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 from src.config_loader import save_config
 from src.errors.base import PersonDetectorError
-from src.errors.video import VideoOpenError
-from src.gui.fps_meter import FpsMeter, describe_speed
-from src.gui.live_chart import LiveChart
-from src.gui.video_label import VideoLabel
+from src.gui.source_preview import (
+    WEBCAM_INDEX,
+    ask_video_path,
+    describe_source,
+    load_preview,
+)
 from src.gui.video_worker import VideoWorker, shrink_for_display
-from src.overlay import draw_zone_preview
-from src.run_dir import make_run_dir
-from src.video_reader import VideoReader
+from src.gui.widgets.live_chart import LiveChart
+from src.gui.widgets.panels import RunPanel, SourcePanel, ZonePanel
+from src.gui.widgets.speed_readout import SpeedReadout
+from src.gui.widgets.video_label import VideoLabel
+from src.gui.zone_editor import ZoneEditor
+from src.reporting.run_dir import make_run_dir
+from src.video.overlay import draw_zone_preview
 
-VIDEO_FILTER = "Videos (*.mp4 *.avi *.mov *.mkv *.m4v *.wmv *.webm);;All files (*)"
-DEFAULT_VIDEO_DIR = "videos"
 DEPTH_PLACEHOLDER = "The depth view starts with the processing."
-WEBCAM_INDEX = 0
-WEBCAM_WARMUP_FRAMES = 5
 
 
 class MainWindow(QMainWindow):
@@ -45,14 +37,12 @@ class MainWindow(QMainWindow):
         self.worker = None
         self.first_frame = None
         self.is_live = False
-        self.calibrating = False
-        self.calibration_points = []
-        self.video_fps = None
-        self.fps_meter = FpsMeter()
+        self.zone_editor = ZoneEditor()
 
         self.setWindowTitle("Redzone Monitor")
         self.resize(1320, 900)
         self._build_ui()
+        self._connect_signals()
         if source is not None:
             self.load_source(source)
         self._update_controls()
@@ -60,68 +50,15 @@ class MainWindow(QMainWindow):
     def _build_ui(self):
         self.video_label = VideoLabel("Open a video to start.")
         self.video_label.setMinimumSize(480, 270)
-        self.video_label.clicked.connect(self.on_video_clicked)
-
         self.depth_label = VideoLabel(DEPTH_PLACEHOLDER)
         self.depth_label.setMinimumSize(480, 270)
 
-        self.open_button = QPushButton("Open video...")
-        self.open_button.clicked.connect(self.choose_video)
-        self.webcam_button = QPushButton("Use webcam")
-        self.webcam_button.clicked.connect(self.use_webcam)
-        self.video_name_label = QLabel("No video selected")
-        self.video_name_label.setWordWrap(True)
-
-        video_box = QGroupBox("Video")
-        video_layout = QVBoxLayout(video_box)
-        video_layout.addWidget(self.open_button)
-        video_layout.addWidget(self.webcam_button)
-        video_layout.addWidget(self.video_name_label)
-
-        self.start_button = QPushButton("Start")
-        self.pause_button = QPushButton("Pause")
-        self.stop_button = QPushButton("Stop")
-        self.start_button.clicked.connect(self.start_processing)
-        self.pause_button.clicked.connect(self.toggle_pause)
-        self.stop_button.clicked.connect(self.stop_processing)
-
-        run_box = QGroupBox("Processing")
-        run_layout = QVBoxLayout(run_box)
-        self.depth_check = QCheckBox("Depth view (closest person)")
-        self.depth_check.setChecked(
+        self.source_panel = SourcePanel()
+        self.run_panel = RunPanel(
             bool(self.config.get("depth", {}).get("enabled", False))
         )
-        self.depth_check.toggled.connect(self.depth_label.setVisible)
-        run_layout.addWidget(self.depth_check)
-        run_layout.addWidget(self.start_button)
-        run_layout.addWidget(self.pause_button)
-        run_layout.addWidget(self.stop_button)
-
-        self.limit_spin = QSpinBox()
-        self.limit_spin.setRange(1, 99)
-        self.limit_spin.setValue(int(self.config["person_limit"]))
-        self.edit_button = QPushButton("Edit zone")
-        self.edit_button.setCheckable(True)
-        self.undo_button = QPushButton("Undo last point")
-        self.save_button = QPushButton("Save zone and limit")
-        self.edit_button.toggled.connect(self.toggle_calibration)
-        self.undo_button.clicked.connect(self.undo_point)
-        self.save_button.clicked.connect(self.save_settings)
-
-        limit_row = QHBoxLayout()
-        limit_row.addWidget(QLabel("Person limit"))
-        limit_row.addWidget(self.limit_spin)
-
-        zone_box = QGroupBox("Zone and limit")
-        zone_layout = QVBoxLayout(zone_box)
-        zone_layout.addLayout(limit_row)
-        zone_layout.addWidget(self.edit_button)
-        zone_layout.addWidget(self.undo_button)
-        zone_layout.addWidget(self.save_button)
-
-        self.fps_label = QLabel("")
-        self.fps_label.setWordWrap(True)
-
+        self.zone_panel = ZonePanel(int(self.config["person_limit"]))
+        self.fps_label = SpeedReadout()
         self.status_label = QLabel("")
         self.status_label.setWordWrap(True)
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -129,17 +66,17 @@ class MainWindow(QMainWindow):
         side_panel = QWidget()
         side_panel.setFixedWidth(260)
         side_layout = QVBoxLayout(side_panel)
-        side_layout.addWidget(video_box)
-        side_layout.addWidget(run_box)
-        side_layout.addWidget(zone_box)
+        side_layout.addWidget(self.source_panel)
+        side_layout.addWidget(self.run_panel)
+        side_layout.addWidget(self.zone_panel)
         side_layout.addWidget(self.fps_label)
         side_layout.addWidget(self.status_label, stretch=1)
 
         top_row = QHBoxLayout()
         top_row.addWidget(self.video_label, stretch=1)
         top_row.addWidget(self.depth_label, stretch=1)
-        self.depth_label.setVisible(self.depth_check.isChecked())
         top_row.addWidget(side_panel)
+        self.depth_label.setVisible(self.run_panel.depth_check.isChecked())
 
         self.chart = LiveChart(int(self.config["person_limit"]))
         self.chart.setMinimumHeight(280)
@@ -147,10 +84,23 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout()
         layout.addLayout(top_row, stretch=5)
         layout.addWidget(self.chart, stretch=3)
-
         container = QWidget()
         container.setLayout(layout)
         self.setCentralWidget(container)
+
+    def _connect_signals(self):
+        self.video_label.clicked.connect(self.on_video_clicked)
+        self.source_panel.open_button.clicked.connect(self.choose_video)
+        self.source_panel.webcam_button.clicked.connect(self.use_webcam)
+        self.run_panel.depth_check.toggled.connect(self.depth_label.setVisible)
+        self.run_panel.start_button.clicked.connect(self.start_processing)
+        self.run_panel.pause_button.clicked.connect(self.toggle_pause)
+        self.run_panel.stop_button.clicked.connect(self.stop_processing)
+        self.zone_panel.edit_button.toggled.connect(self.toggle_calibration)
+        self.zone_panel.undo_button.clicked.connect(self.undo_point)
+        self.zone_panel.save_button.clicked.connect(self.save_settings)
+
+    # ---- source ----
 
     def choose_video(self):
         if self._is_running():
@@ -167,92 +117,69 @@ class MainWindow(QMainWindow):
         self._update_controls()
 
     def _ask_video_path(self):
-        start_dir = DEFAULT_VIDEO_DIR
-        if isinstance(self.source, str):
-            start_dir = str(Path(self.source).parent)
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Select a video", start_dir, VIDEO_FILTER
-        )
-        return path
-
-    def _read_preview_frame(self, reader):
-        """The first frame of a file, or a settled frame of a camera."""
-        frames = reader.frames()
-        frame = None
-        for _ in range(WEBCAM_WARMUP_FRAMES if reader.is_live else 1):
-            frame = next(frames, None)
-            if frame is None:
-                break
-        return frame
+        return ask_video_path(self, self.source)
 
     def load_source(self, source):
         """Show a frame of source. On failure the current source is kept."""
         try:
-            with VideoReader(source) as reader:
-                live = reader.is_live
-                fps = reader.fps
-                first_frame = self._read_preview_frame(reader)
-            if first_frame is None:
-                raise VideoOpenError(f"No frames could be read from: {source}")
+            preview = load_preview(source)
         except PersonDetectorError as e:
             self.status_label.setText(f"Error: {e}")
             if self.first_frame is None:
                 self.video_label.setText(f"Error: {e}")
             return False
 
-        if self.calibrating:
-            self.edit_button.setChecked(False)
+        if self.zone_editor.active:
+            self.zone_panel.edit_button.setChecked(False)
         self.source = source
-        self.is_live = live
-        self.video_fps = None if live else fps
-        self.first_frame = first_frame
-        self.video_name_label.setText(
-            f"Webcam (camera {source})" if live else Path(source).name
-        )
+        self.is_live = preview.live
+        self.first_frame = preview.first_frame
+        self.source_panel.name_label.setText(describe_source(source, preview.live))
         self.status_label.setText("")
-        self._update_fps_label()
+        self.fps_label.set_source(preview.live, preview.fps)
         self.clear_view()
         return True
 
-    def _update_fps_label(self, processing=None):
-        lines = []
-        if self.is_live:
-            lines.append("Source: webcam (live)")
-        elif self.video_fps:
-            lines.append(f"Source video: {self.video_fps:.2f} fps")
-        if processing:
-            lines.append(f"Processing: {processing}")
-        self.fps_label.setText("\n".join(lines))
+    # ---- view ----
 
     def _show_zone_preview(self, points):
         if self.first_frame is None:
             return
         canvas = self.first_frame.copy()
         draw_zone_preview(canvas, [tuple(point) for point in points])
-        self.show_frame(shrink_for_display(canvas))
+        self.video_label.show_frame(shrink_for_display(canvas))
+
+    def clear_view(self):
+        self.chart.reset()
+        self.depth_label.clear()
+        self.depth_label.setText(DEPTH_PLACEHOLDER)
+        self._show_zone_preview(self.config["roi"])
 
     def _is_running(self):
         return self.worker is not None and self.worker.isRunning()
 
     def _update_controls(self):
         running = self._is_running()
-        has_video = self.first_frame is not None
-        self.open_button.setEnabled(not running)
-        self.depth_check.setEnabled(not running)
-        self.webcam_button.setEnabled(not running)
-        self.stop_button.setEnabled(running)
-        self.start_button.setEnabled(has_video and not running)
-        self.pause_button.setEnabled(running)
-        self.limit_spin.setEnabled(not running)
-        self.edit_button.setEnabled(has_video and not running)
-        self.undo_button.setEnabled(self.calibrating and not running)
-        self.save_button.setEnabled(has_video and not running)
+        has_source = self.first_frame is not None
+        self.source_panel.update_state(running)
+        self.run_panel.update_state(running, has_source)
+        self.zone_panel.update_state(running, has_source, self.zone_editor.active)
+
+    # ---- processing ----
+
+    def _run_config(self):
+        """The saved config plus this run's depth switch, which is never written."""
+        depth = {
+            **self.config.get("depth", {}),
+            "enabled": self.run_panel.depth_check.isChecked(),
+        }
+        return {**self.config, "depth": depth}
 
     def start_processing(self):
         if self._is_running():
             return
-        if self.calibrating:
-            self.edit_button.setChecked(False)
+        if self.zone_editor.active:
+            self.zone_panel.edit_button.setChecked(False)
         run_dir = make_run_dir(self.output_base, self.source)
         self.chart.reset()
         self.chart.set_limit(int(self.config["person_limit"]))
@@ -261,20 +188,11 @@ class MainWindow(QMainWindow):
         self.worker.frame_ready.connect(self.on_frame)
         self.worker.error.connect(self.show_error)
         self.worker.finished.connect(self.on_finished)
-        self.pause_button.setText("Pause")
+        self.run_panel.pause_button.setText("Pause")
         self.status_label.setText(f"Processing. Results in {run_dir}")
-        self.fps_meter.reset()
-        self._update_fps_label("measuring...")
+        self.fps_label.begin()
         self.worker.start()
         self._update_controls()
-
-    def _run_config(self):
-        """The saved config plus this run's depth switch, which is never written."""
-        depth = {
-            **self.config.get("depth", {}),
-            "enabled": self.depth_check.isChecked(),
-        }
-        return {**self.config, "depth": depth}
 
     def stop_processing(self):
         if self._is_running():
@@ -285,62 +203,36 @@ class MainWindow(QMainWindow):
             return
         if self.worker.is_paused:
             self.worker.resume()
-            self.fps_meter.resume(perf_counter())
-            self.pause_button.setText("Pause")
-            self._update_fps_label("measuring...")
+            self.fps_label.resume()
+            self.run_panel.pause_button.setText("Pause")
         else:
             self.worker.pause()
-            self.fps_meter.pause(perf_counter())
-            self.pause_button.setText("Resume")
-            self._update_fps_label("paused")
+            self.fps_label.pause()
+            self.run_panel.pause_button.setText("Resume")
 
     def on_frame(self, update):
-        self.show_frame(update.frame)
+        self.video_label.show_frame(update.frame)
         if update.depth_frame is not None:
-            self.show_frame(update.depth_frame, self.depth_label)
+            self.depth_label.show_frame(update.depth_frame)
         self.chart.add_point(update.time_s, update.count)
-        self.fps_meter.tick(perf_counter())
-        fps = self.fps_meter.current_fps()
-        self._update_fps_label(
-            describe_speed(fps, self.video_fps) if fps else "measuring..."
-        )
-
-    def show_frame(self, frame, label=None):
-        label = label or self.video_label
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        height, width, channels = rgb.shape
-        image = QImage(
-            rgb.data, width, height, channels * width, QImage.Format.Format_RGB888
-        )
-        label.show_image(QPixmap.fromImage(image))
+        self.fps_label.tick()
 
     def show_error(self, message):
         self.status_label.setText(f"Error: {message}")
 
     def on_finished(self):
-        self.pause_button.setText("Pause")
-        average = self.fps_meter.average_fps()
-        if average:
-            self._update_fps_label(
-                f"finished, {describe_speed(average, self.video_fps)}"
-            )
-        else:
-            self._update_fps_label("stopped before the first frame")
+        self.run_panel.pause_button.setText("Pause")
+        self.fps_label.finish()
         if not self.status_label.text().startswith("Error"):
             self.status_label.setText(f"Finished. Results in {self.worker.run_dir}")
         self.clear_view()
         self._update_controls()
 
-    def clear_view(self):
-        self.chart.reset()
-        self.depth_label.clear()
-        self.depth_label.setText(DEPTH_PLACEHOLDER)
-        self._show_zone_preview(self.config["roi"])
+    # ---- zone editing ----
 
     def toggle_calibration(self, checked):
-        self.calibrating = checked
         if checked:
-            self.calibration_points = []
+            self.zone_editor.begin()
             self.video_label.click_frame_size = (
                 self.first_frame.shape[1],
                 self.first_frame.shape[0],
@@ -348,34 +240,32 @@ class MainWindow(QMainWindow):
             self.status_label.setText("Press Save when the zone has at least 3 points.")
             self._render_calibration()
         else:
+            self.zone_editor.end()
             self.video_label.click_frame_size = None
             self._show_zone_preview(self.config["roi"])
         self._update_controls()
 
     def on_video_clicked(self, x, y, button):
-        if not self.calibrating or self._is_running():
+        if not self.zone_editor.active or self._is_running():
             return
-        if button == Qt.MouseButton.LeftButton:
-            self.calibration_points.append((x, y))
-        elif button == Qt.MouseButton.RightButton and self.calibration_points:
-            self.calibration_points.pop()
+        self.zone_editor.click(x, y, button)
         self._render_calibration()
 
     def undo_point(self):
-        if self.calibrating and self.calibration_points:
-            self.calibration_points.pop()
+        if self.zone_editor.active and self.zone_editor.undo():
             self._render_calibration()
 
     def _render_calibration(self):
-        self._show_zone_preview(self.calibration_points)
+        self._show_zone_preview(self.zone_editor.points)
 
     def save_settings(self):
-        if self.calibrating and len(self.calibration_points) < 3:
+        editing = self.zone_editor.active
+        if editing and not self.zone_editor.can_save:
             self.status_label.setText("A zone needs at least 3 points.")
             return
-        if self.calibrating:
-            self.config["roi"] = [list(point) for point in self.calibration_points]
-        self.config["person_limit"] = self.limit_spin.value()
+        if editing:
+            self.config["roi"] = self.zone_editor.roi()
+        self.config["person_limit"] = self.zone_panel.limit_spin.value()
         try:
             save_config(self.config_path, self.config)
         except PersonDetectorError as e:
@@ -383,8 +273,8 @@ class MainWindow(QMainWindow):
             return
         self.chart.set_limit(self.config["person_limit"])
         self.status_label.setText(f"Saved to {self.config_path}")
-        if self.calibrating:
-            self.edit_button.setChecked(False)
+        if editing:
+            self.zone_panel.edit_button.setChecked(False)
 
     def closeEvent(self, event):
         if self._is_running():

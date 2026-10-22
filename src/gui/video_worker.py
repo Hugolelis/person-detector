@@ -5,7 +5,7 @@ import cv2
 from PySide6.QtCore import QThread, Signal
 from src.errors.base import PersonDetectorError
 from src.pipeline import Pipeline
-from src.video_reader import VideoReader
+from src.video.reader import VideoReader
 
 DISPLAY_WIDTH = 1280
 

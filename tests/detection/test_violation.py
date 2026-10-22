@@ -1,5 +1,5 @@
+from src.detection.violation import ViolationDetector
 from src.enums.violation_event import ViolationEvent
-from src.violation import ViolationDetector
 
 STARTED = ViolationEvent.STARTED
 ENDED = ViolationEvent.ENDED

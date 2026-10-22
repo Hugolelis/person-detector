@@ -1,6 +1,6 @@
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from src.chart import draw_empty_occupancy, draw_occupancy
+from src.reporting.chart import draw_empty_occupancy, draw_occupancy
 
 REDRAW_INTERVAL_S = 1.0
 
