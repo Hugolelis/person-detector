@@ -23,16 +23,24 @@ def _moving_median(values, window):
     return np.median(windows, axis=1)
 
 
-def plot_occupancy(series_path, output_path, limit):
+def plot_occupancy(series_path, output_path, limit, smoothing_seconds=1.0):
     timestamps, counts = _read_series(series_path)
+    raw = np.array(counts, dtype=float)
+
+    window = 1
+    if len(timestamps) > 1:
+        frame_duration = float(np.median(np.diff(timestamps)))
+        window = max(1, round(smoothing_seconds / frame_duration))
+    smoothed = _moving_median(raw, window)
 
     times = np.linspace(timestamps[0], timestamps[-1], len(timestamps) * 20)
-    values = np.interp(times, timestamps, counts)
+    values = np.interp(times, timestamps, smoothed)
     above_limit = np.ma.masked_where(values <= limit, values)
 
     figure = Figure(figsize=(12, 5))
     axes = figure.subplots()
-    axes.plot(times, values, color="tab:blue", label="Occupancy")
+    axes.plot(timestamps, raw, color="lightgray", label="Raw count")
+    axes.plot(times, values, color="tab:blue", label="Occupancy (smoothed)")
     axes.plot(times, above_limit, color="red", label="Above limit")
     axes.axhline(limit, color="red", linestyle="--", label=f"Limit ({limit})")
     axes.legend()
