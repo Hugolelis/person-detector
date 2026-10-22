@@ -15,6 +15,14 @@ def _read_series(series_path):
     return timestamps, counts
 
 
+def _moving_median(values, window):
+    if window % 2 == 0:
+        window += 1
+    padded = np.pad(values, window // 2, mode="edge")
+    windows = np.lib.stride_tricks.sliding_window_view(padded, window)
+    return np.median(windows, axis=1)
+
+
 def plot_occupancy(series_path, output_path, limit):
     timestamps, counts = _read_series(series_path)
 
