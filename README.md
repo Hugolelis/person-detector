@@ -110,6 +110,7 @@ With **Depth view** on, a second panel shows a depth map next to the video. Ever
 | [NumPy](https://numpy.org) | Array operations |
 | [PyYAML](https://pyyaml.org) | Configuration file |
 | [Poetry](https://python-poetry.org) | Dependency and environment management |
+| [Docker](https://www.docker.com) | Reproducible environment, no local installation |
 | [pytest](https://pytest.org) and [Ruff](https://docs.astral.sh/ruff/) | Tests, linting and formatting |
 
 ---
@@ -123,6 +124,8 @@ With **Depth view** on, a second panel shows a depth map next to the video. Ever
 ├── main.py                       CLI entry point
 ├── gui.py                        desktop window entry point
 ├── calibrate.py                  command-line zone calibration
+├── Dockerfile                    image with the dependencies and YOLO weights
+├── docker-compose.yml            services and volumes for the CLI and the window
 ├── config/
 │   └── config.yaml
 ├── src/
@@ -204,7 +207,7 @@ The first run downloads the YOLO weights (`yolov8n.pt`, about 6 MB) into the pro
 
 ### Environment Variables
 
-The project does not use environment variables. Everything is configured in `config/config.yaml`.
+The project does not use environment variables. Everything is configured in `config/config.yaml`. The only exceptions are `HOST_UID` and `HOST_GID`, read by `docker-compose.yml` (see [Running with Docker](#running-with-docker)).
 
 ### Running locally
 
@@ -213,6 +216,77 @@ poetry run python gui.py
 ```
 
 Use **Open video...** in the window to pick a file, or pass `--video videos/your_video.mp4` to open one directly.
+
+### Running with Docker
+
+Docker avoids installing Python, Poetry and the system libraries on your machine. You only need [Docker](https://docs.docker.com/engine/install/) with the Compose plugin.
+
+```bash
+docker compose build
+```
+
+The image has the CPU build of PyTorch and the YOLO weights (`yolov8n.pt`) baked in. `videos/`, `outputs/` and `config/` are mounted from your project folder, so your videos, results and zone settings stay on your machine. A copy of `config/config.yaml` is also inside the image as a default, used only when you run it without the mount. The depth model (about 100 MB) is downloaded on first use into a Docker volume (`hf-cache`) and reused afterwards.
+
+#### Process a video from the command line
+
+```bash
+docker compose run --rm detector main.py --video videos/your_video.mp4
+```
+
+Any option from [Commands](#commands) works after the script name, for example `--output outputs`.
+
+#### Open the window (with webcam)
+
+This is the main way to run the desktop window. Run these two commands from the project folder:
+
+```bash
+xhost +local:docker
+docker compose -f docker-compose.yml -f docker-compose.webcam.yml up gui
+```
+
+What each line does:
+
+| Command | Why it is needed |
+|---|---|
+| `xhost +local:docker` | Lets the container draw on your screen. The X server refuses windows from programs it does not know, and the container is one of them. Run it once per login session (it is forgotten on logout or reboot) |
+| `-f docker-compose.yml -f docker-compose.webcam.yml` | Loads the main file plus the webcam override, which passes `/dev/video0` (camera 0) into the container. Without it the window shows `Could not open camera 0` |
+| `up gui` | Starts the `gui` service, which opens `gui.py`. The container is named `person-detector` (with `run` it would get a random name) |
+
+To stop, close the window or press `Ctrl+C` in the terminal. Afterwards:
+
+```bash
+docker compose down          # remove the stopped container and the network
+xhost -local:docker          # revoke the display access granted above
+```
+
+Use `docker stop person-detector` from another terminal if you prefer, and `docker start person-detector` to start it again without `up`.
+
+Without a webcam (or to open only video files), drop the webcam file:
+
+```bash
+xhost +local:docker
+docker compose up gui
+```
+
+The camera needs `/dev/video0` to exist on the host (`ls /dev/video*`) and your user to be allowed on it. If it still does not open, set the id of your `video` group with `export VIDEO_GID=$(getent group video | cut -d: -f3)` and try again.
+
+#### Draw the zone from the terminal
+
+`calibrate.py` also needs the display, but it is a one-off command, so it uses `run`:
+
+```bash
+xhost +local:docker
+docker compose run --rm gui calibrate.py --video videos/your_video.mp4
+xhost -local:docker
+```
+
+On Wayland (GNOME), `xhost` talks to XWayland, which provides the X server the container connects to.
+
+**File ownership.** The container runs as user and group `1000` by default, so the files in `outputs/` and `config/` belong to you. If your user id is different (`id -u`), set it first:
+
+```bash
+export HOST_UID=$(id -u) HOST_GID=$(id -g)
+```
 
 ---
 

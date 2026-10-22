@@ -1,0 +1,19 @@
+.git
+.gitignore
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.py[cod]
+
+# Mounted as volumes at run time, never baked into the image
+outputs/
+videos/
+*.pt
+
+# Docs and tooling that the app does not need
+docs/
+diagram/
+tests/
+README.md
+Dockerfile
+docker-compose.yml

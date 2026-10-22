@@ -1,0 +1,35 @@
+x-app: &app
+  image: person-detector
+  # Run as the host user so files written to outputs/ and config/ are yours.
+  user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+  volumes:
+    - ./videos:/app/videos
+    - ./outputs:/app/outputs
+    - ./config:/app/config
+    - hf-cache:/cache/huggingface
+
+services:
+  # docker compose run --rm detector main.py --video videos/your_video.mp4
+  detector:
+    <<: *app
+    build: .
+
+  # Windows (gui.py, calibrate.py) shown through the host's X11 server.
+  # docker compose run --rm gui gui.py
+  gui:
+    <<: *app
+    container_name: person-detector
+    command: ["gui.py"]
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - QT_X11_NO_MITSHM=1
+    volumes:
+      - ./videos:/app/videos
+      - ./outputs:/app/outputs
+      - ./config:/app/config
+      - hf-cache:/cache/huggingface
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    # Webcam: add docker-compose.webcam.yml (see the README).
+
+volumes:
+  hf-cache:

@@ -1,0 +1,9 @@
+# Adds the webcam (camera 0) to the gui service. Use together with the main file:
+# docker compose -f docker-compose.yml -f docker-compose.webcam.yml run --rm gui gui.py
+services:
+  gui:
+    devices:
+      - /dev/video0:/dev/video0
+    # Needed if your user is not allowed on the camera by an ACL (id: `getent group video`).
+    group_add:
+      - "${VIDEO_GID:-44}"
