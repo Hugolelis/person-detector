@@ -35,7 +35,7 @@
 
 ## About
 
-Counting people in a video is easy; deciding when a zone is *actually* over its limit is not. A detector flickers: it misses someone for a frame or sees a ghost for one, so a naive "count above the limit" check fires dozens of false alerts on a single event. This project puts a debounce state machine between the detector and the alerts, counts a person only when their feet are inside the zone (so a zone drawn on the ground behaves like one), and keeps a rolling buffer so each clip shows what happened *before* the alert, not just after. Everything runs on the CPU, with no GPU required.
+Counting people in a video is easy; deciding when a zone is *actually* over its limit is not. A detector flickers: it misses someone for a frame or sees a ghost for one, so a naive "count above the limit" check fires dozens of false alerts on a single event. This project puts a debounce state machine between the detector and the alerts, counts a person only when enough of their box is inside the zone (a percentage you set in the config), and keeps a rolling buffer so each clip shows what happened *before* the alert, not just after. Everything runs on the CPU, with no GPU required.
 
 ---
 
@@ -75,7 +75,7 @@ The same pipeline in the desktop window: live video with detections, live occupa
 
 | Capability | Description |
 |---|---|
-| **Zone-based counting** | A person counts when the bottom-center of their bounding box (roughly the feet) is inside the zone polygon |
+| **Zone-based counting** | A person counts when at least `counting.min_overlap_percent` of their bounding box area is inside the zone polygon (default 30%) |
 | **Debounce** | A violation starts after N consecutive frames above the limit, ends after M consecutive frames at or below it, with a cooldown between events |
 | **Clips with context** | Each violation is saved with seconds of video from before the event (circular buffer) and after it, with the overlay drawn on |
 | **Logs** | `series.csv` with the count of every frame and `events.csv` with the start, end, peak and clip of every violation |
@@ -137,7 +137,7 @@ The same pipeline in the desktop window: live video with detections, live occupa
 └── diagram/                    usage flow
 ```
 
-**Why this shape:** the frame is reduced once, on entry, so detection, drawing, the clip buffer and the window all work at 1280 pixels wide instead of repeating 4K operations. `Pipeline.process` handles exactly one frame and returns the result, so the CLI loop and the window's worker thread share the same logic instead of duplicating it. The debounce lives in its own class that only sees integer counts, which makes it testable with made-up sequences and no model. No class reads the YAML on its own: the entry points load the config and hand plain values down, so everything can be tested without files. Errors derive from one base exception, so the entry points catch every expected failure in a single `except` and let real bugs surface with a full traceback. The feet rule exists because the zone represents an area on the ground, and a box center would count someone standing in front of it.
+**Why this shape:** the frame is reduced once, on entry, so detection, drawing, the clip buffer and the window all work at 1280 pixels wide instead of repeating 4K operations. `Pipeline.process` handles exactly one frame and returns the result, so the CLI loop and the window's worker thread share the same logic instead of duplicating it. The debounce lives in its own class that only sees integer counts, which makes it testable with made-up sequences and no model. No class reads the YAML on its own: the entry points load the config and hand plain values down, so everything can be tested without files. Errors derive from one base exception, so the entry points catch every expected failure in a single `except` and let real bugs surface with a full traceback. Counting uses the share of the box inside the zone instead of a single point, so a person half in and half out is not decided by one pixel. The default is a low 30% on purpose: the zone is drawn on the ground, so for someone standing inside it, only the lower part of their box overlaps it. Raise it to be stricter, lower it to count anyone touching the zone.
 
 **Known limitations:**
 - YOLO on a CPU is the bottleneck: expect a few frames per second on 4K video, not real time.
@@ -178,8 +178,10 @@ The project does not use environment variables. Everything is configured in `con
 ### Running locally
 
 ```bash
-poetry run python gui.py --video videos/your_video.mp4
+poetry run python gui.py
 ```
+
+Use **Open video...** in the window to pick a file, or pass `--video videos/your_video.mp4` to open one directly.
 
 ---
 
@@ -204,10 +206,14 @@ poetry run python main.py --video videos/your_video.mp4
 ### 3. Or process it in the window
 
 ```bash
-poetry run python gui.py --video videos/your_video.mp4
+poetry run python gui.py
 ```
 
-Press **Start**. The video plays with the detections, the chart grows below it, and **Pause** freezes and resumes the processing. The side panel shows the fps of the source video and how fast it is actually being processed, in frames per second and as a multiple of real time. While **Edit zone** is active, left click on the video adds a point and right click removes the last one.
+Click **Open video...** and pick a file from your computer (`--video PATH` opens one directly), or click **Use webcam** to detect live from camera 0. The source can be changed between runs, not while it is processing. Then press **Start**.
+
+The video plays with the detections, the chart grows below it, and **Pause** freezes and resumes the processing and **Stop** ends the run early. The side panel shows the fps of the source video and how fast it is actually being processed, in frames per second and as a multiple of real time. While **Edit zone** is active, left click on the video adds a point and right click removes the last one.
+
+With the webcam the run has no end: press **Stop** when you are done. Times in the CSVs, the chart and the clips follow the real clock, so they stay correct even when processing is slower than the camera. Draw the zone again for the webcam (**Edit zone**), because the zone is stored in pixels of the source video and the camera usually has another resolution.
 
 ---
 
@@ -216,7 +222,7 @@ Press **Start**. The video plays with the detections, the chart grows below it, 
 | Command | Description |
 |---|---|
 | `python main.py --video PATH` | Process a video and write clips, CSVs and the chart. Optional: `--config` (default `config/config.yaml`), `--output` (default `outputs`) |
-| `python gui.py --video PATH` | Open the window with live video, live chart and the zone editor. Same optional flags |
+| `python gui.py` | Open the window with live video, live chart and the zone editor. Optional: `--video` (otherwise pick the file in the window), `--config`, `--output` |
 | `python calibrate.py --video PATH` | Draw the zone on the first frame and save it, asking for the limit. Optional: `--config` |
 | `python -m scripts.tune_parameters --video PATH` | Evaluate confidence thresholds and debounce settings offline |
 
@@ -234,6 +240,7 @@ Press **Start**. The video plays with the detections, the chart grows below it, 
 | `detection.stride` | *Optional.* Run YOLO every N frames and reuse the last boxes in between (default `1`). Counting and debounce still run on every frame |
 | `processing.width` | *Optional.* Frames wider than this are reduced once, on entry (default `1280`), and everything after runs at that size. `roi` stays in original-frame pixels and is scaled automatically. `0` keeps the original size |
 | `roi` | Zone polygon, a list of `[x, y]` points in the pixels of the original frame |
+| `counting.min_overlap_percent` | *Optional.* Percentage (0 to 100) of a person's box that must be inside the zone to count them (default `30`). `0` counts anyone touching the zone, `100` only people fully inside |
 | `person_limit` | A violation needs a count strictly **above** this value |
 | `violation.frames_to_confirm_start` | Consecutive frames above the limit to start a violation |
 | `violation.frames_to_confirm_end` | Consecutive frames at or below the limit to end it |

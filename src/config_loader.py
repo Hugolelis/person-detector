@@ -35,6 +35,14 @@ def load_config(path):
     if missing:
         raise ConfigError(f"Missing keys in config: {', '.join(missing)}")
 
+    overlap = config.get("counting", {}).get("min_overlap_percent")
+    if overlap is not None and not (
+        isinstance(overlap, (int, float)) and 0 <= overlap <= 100
+    ):
+        raise ConfigError(
+            f"counting.min_overlap_percent must be a number from 0 to 100: {overlap}"
+        )
+
     return config
 
 

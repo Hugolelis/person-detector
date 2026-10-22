@@ -7,11 +7,13 @@ from src.pipeline import run_pipeline
 from src.run_dir import make_run_dir
 
 
-def parse_args():
+def parse_args(video_required=True):
     parser = argparse.ArgumentParser(
         description="Detect people in a red zone and record violations."
     )
-    parser.add_argument("--video", required=True, help="Path to the input video.")
+    parser.add_argument(
+        "--video", required=video_required, help="Path to the input video."
+    )
     parser.add_argument(
         "--config", default="config/config.yaml", help="Path to the YAML config."
     )

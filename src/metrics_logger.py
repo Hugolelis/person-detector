@@ -27,35 +27,47 @@ class MetricsLogger:
 
         self._open_violation = None
         self._last_frame = 0
+        self._last_time = 0.0
 
-    def _to_seconds(self, frame_index: int) -> float:
-        return round(frame_index / self.fps, 3)
+    def _to_seconds(self, frame_index: int, time_s: float | None = None) -> float:
+        """Use the measured time when given, else derive it from the frame index."""
+        if time_s is None:
+            time_s = frame_index / self.fps
+        return round(time_s, 3)
 
-    def log_frame(self, frame_index: int, count: int, in_violation: bool):
+    def log_frame(
+        self,
+        frame_index: int,
+        count: int,
+        in_violation: bool,
+        time_s: float | None = None,
+    ):
         self._last_frame = frame_index
+        self._last_time = self._to_seconds(frame_index, time_s)
         self._series_writer.writerow(
-            [frame_index, self._to_seconds(frame_index), count, in_violation]
+            [frame_index, self._last_time, count, in_violation]
         )
         if self._open_violation is not None:
             self._open_violation["peak"] = max(self._open_violation["peak"], count)
 
-    def start_violation(self, frame_index: int, clip_path):
+    def start_violation(self, frame_index: int, clip_path, time_s: float | None = None):
         self._open_violation = {
             "start_frame": frame_index,
+            "start_time": self._to_seconds(frame_index, time_s),
             "clip_path": str(clip_path),
             "peak": 0,
         }
 
-    def end_violation(self, frame_index: int):
+    def end_violation(self, frame_index: int, time_s: float | None = None):
         violation = self._open_violation
         if violation is None:
             return
         self._events_writer.writerow(
             [
                 violation["start_frame"],
-                self._to_seconds(violation["start_frame"]),
+                violation["start_time"],
                 frame_index,
-                self._to_seconds(frame_index),
+                self._to_seconds(frame_index, time_s),
                 violation["peak"],
                 violation["clip_path"],
             ]
@@ -64,7 +76,7 @@ class MetricsLogger:
 
     def close(self):
         if self._open_violation is not None:
-            self.end_violation(self._last_frame)
+            self.end_violation(self._last_frame, self._last_time)
         self._series_file.close()
         self._events_file.close()
 

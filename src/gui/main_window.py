@@ -1,9 +1,11 @@
+from pathlib import Path
 from time import perf_counter
 
 import cv2
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
+    QFileDialog,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -15,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 from src.config_loader import save_config
 from src.errors.base import PersonDetectorError
+from src.errors.video import VideoOpenError
 from src.gui.fps_meter import FpsMeter, describe_speed
 from src.gui.live_chart import LiveChart
 from src.gui.video_label import VideoLabel
@@ -23,16 +26,23 @@ from src.overlay import draw_zone_preview
 from src.run_dir import make_run_dir
 from src.video_reader import VideoReader
 
+VIDEO_FILTER = "Videos (*.mp4 *.avi *.mov *.mkv *.m4v *.wmv *.webm);;All files (*)"
+DEFAULT_VIDEO_DIR = "videos"
+WEBCAM_INDEX = 0
+WEBCAM_WARMUP_FRAMES = 5
+
 
 class MainWindow(QMainWindow):
-    def __init__(self, video_path, config, config_path, output_base):
+    def __init__(self, source, config, config_path, output_base):
+        """source is a file path, a camera index, or None to pick it in the window."""
         super().__init__()
-        self.video_path = video_path
+        self.source = None
         self.config = config
         self.config_path = config_path
         self.output_base = output_base
         self.worker = None
         self.first_frame = None
+        self.is_live = False
         self.calibrating = False
         self.calibration_points = []
         self.video_fps = None
@@ -41,23 +51,40 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Redzone Monitor")
         self.resize(1320, 900)
         self._build_ui()
-        self._load_first_frame()
+        if source is not None:
+            self.load_source(source)
         self._update_controls()
 
     def _build_ui(self):
-        self.video_label = VideoLabel("Loading video...")
+        self.video_label = VideoLabel("Open a video to start.")
         self.video_label.setMinimumSize(640, 360)
         self.video_label.clicked.connect(self.on_video_clicked)
 
+        self.open_button = QPushButton("Open video...")
+        self.open_button.clicked.connect(self.choose_video)
+        self.webcam_button = QPushButton("Use webcam")
+        self.webcam_button.clicked.connect(self.use_webcam)
+        self.video_name_label = QLabel("No video selected")
+        self.video_name_label.setWordWrap(True)
+
+        video_box = QGroupBox("Video")
+        video_layout = QVBoxLayout(video_box)
+        video_layout.addWidget(self.open_button)
+        video_layout.addWidget(self.webcam_button)
+        video_layout.addWidget(self.video_name_label)
+
         self.start_button = QPushButton("Start")
         self.pause_button = QPushButton("Pause")
+        self.stop_button = QPushButton("Stop")
         self.start_button.clicked.connect(self.start_processing)
         self.pause_button.clicked.connect(self.toggle_pause)
+        self.stop_button.clicked.connect(self.stop_processing)
 
         run_box = QGroupBox("Processing")
         run_layout = QVBoxLayout(run_box)
         run_layout.addWidget(self.start_button)
         run_layout.addWidget(self.pause_button)
+        run_layout.addWidget(self.stop_button)
 
         self.limit_spin = QSpinBox()
         self.limit_spin.setRange(1, 99)
@@ -91,6 +118,7 @@ class MainWindow(QMainWindow):
         side_panel = QWidget()
         side_panel.setFixedWidth(260)
         side_layout = QVBoxLayout(side_panel)
+        side_layout.addWidget(video_box)
         side_layout.addWidget(run_box)
         side_layout.addWidget(zone_box)
         side_layout.addWidget(self.fps_label)
@@ -111,20 +139,73 @@ class MainWindow(QMainWindow):
         container.setLayout(layout)
         self.setCentralWidget(container)
 
-    def _load_first_frame(self):
-        try:
-            with VideoReader(self.video_path) as reader:
-                self.video_fps = reader.fps
-                self.first_frame = next(reader.frames())
-        except PersonDetectorError as e:
-            self.video_label.setText(f"Error: {e}")
+    def choose_video(self):
+        if self._is_running():
             return
+        path = self._ask_video_path()
+        if path:
+            self.load_source(path)
+            self._update_controls()
+
+    def use_webcam(self):
+        if self._is_running():
+            return
+        self.load_source(WEBCAM_INDEX)
+        self._update_controls()
+
+    def _ask_video_path(self):
+        start_dir = DEFAULT_VIDEO_DIR
+        if isinstance(self.source, str):
+            start_dir = str(Path(self.source).parent)
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select a video", start_dir, VIDEO_FILTER
+        )
+        return path
+
+    def _read_preview_frame(self, reader):
+        """The first frame of a file, or a settled frame of a camera."""
+        frames = reader.frames()
+        frame = None
+        for _ in range(WEBCAM_WARMUP_FRAMES if reader.is_live else 1):
+            frame = next(frames, None)
+            if frame is None:
+                break
+        return frame
+
+    def load_source(self, source):
+        """Show a frame of source. On failure the current source is kept."""
+        try:
+            with VideoReader(source) as reader:
+                live = reader.is_live
+                fps = reader.fps
+                first_frame = self._read_preview_frame(reader)
+            if first_frame is None:
+                raise VideoOpenError(f"No frames could be read from: {source}")
+        except PersonDetectorError as e:
+            self.status_label.setText(f"Error: {e}")
+            if self.first_frame is None:
+                self.video_label.setText(f"Error: {e}")
+            return False
+
+        if self.calibrating:
+            self.edit_button.setChecked(False)
+        self.source = source
+        self.is_live = live
+        self.video_fps = None if live else fps
+        self.first_frame = first_frame
+        self.video_name_label.setText(
+            f"Webcam (camera {source})" if live else Path(source).name
+        )
+        self.status_label.setText("")
         self._update_fps_label()
-        self._show_zone_preview(self.config["roi"])
+        self.clear_view()
+        return True
 
     def _update_fps_label(self, processing=None):
         lines = []
-        if self.video_fps:
+        if self.is_live:
+            lines.append("Source: webcam (live)")
+        elif self.video_fps:
             lines.append(f"Source video: {self.video_fps:.2f} fps")
         if processing:
             lines.append(f"Processing: {processing}")
@@ -143,6 +224,9 @@ class MainWindow(QMainWindow):
     def _update_controls(self):
         running = self._is_running()
         has_video = self.first_frame is not None
+        self.open_button.setEnabled(not running)
+        self.webcam_button.setEnabled(not running)
+        self.stop_button.setEnabled(running)
         self.start_button.setEnabled(has_video and not running)
         self.pause_button.setEnabled(running)
         self.limit_spin.setEnabled(not running)
@@ -155,11 +239,11 @@ class MainWindow(QMainWindow):
             return
         if self.calibrating:
             self.edit_button.setChecked(False)
-        run_dir = make_run_dir(self.output_base, self.video_path)
+        run_dir = make_run_dir(self.output_base, self.source)
         self.chart.reset()
         self.chart.set_limit(int(self.config["person_limit"]))
         self.video_label.click_frame_size = None
-        self.worker = VideoWorker(self.video_path, self.config, run_dir)
+        self.worker = VideoWorker(self.source, self.config, run_dir)
         self.worker.frame_ready.connect(self.on_frame)
         self.worker.error.connect(self.show_error)
         self.worker.finished.connect(self.on_finished)
@@ -169,6 +253,10 @@ class MainWindow(QMainWindow):
         self._update_fps_label("measuring...")
         self.worker.start()
         self._update_controls()
+
+    def stop_processing(self):
+        if self._is_running():
+            self.worker.stop()
 
     def toggle_pause(self):
         if not self._is_running():
@@ -216,8 +304,7 @@ class MainWindow(QMainWindow):
         average = self.fps_meter.average_fps()
         if average:
             self._update_fps_label(
-                f"finished, {describe_speed(average, self.video_fps)} on average "
-                f"over {self.fps_meter.frames} frames"
+                f"finished, {describe_speed(average, self.video_fps)}"
             )
         if not self.status_label.text().startswith("Error"):
             self.status_label.setText(f"Finished. Results in {self.worker.run_dir}")
@@ -236,10 +323,7 @@ class MainWindow(QMainWindow):
                 self.first_frame.shape[1],
                 self.first_frame.shape[0],
             )
-            self.status_label.setText(
-                "Left click adds a point. Right click removes the last one. "
-                "Press Save when the zone has at least 3 points."
-            )
+            self.status_label.setText("Press Save when the zone has at least 3 points.")
             self._render_calibration()
         else:
             self.video_label.click_frame_size = None

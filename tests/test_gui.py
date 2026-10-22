@@ -16,10 +16,13 @@ FPS = 10
 
 
 class FakeDetector:
+    delay = 0.0
+
     def __init__(self, *args, **kwargs):
         pass
 
     def detect(self, frame):
+        time.sleep(FakeDetector.delay)
         return [(10, 10, 30, 80, 0.9), (60, 10, 80, 80, 0.8)]
 
 
@@ -28,20 +31,20 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
-@pytest.fixture
-def video_path(tmp_path):
-    path = tmp_path / "clip.mp4"
-    writer = cv2.VideoWriter(
-        str(path), cv2.VideoWriter_fourcc(*"mp4v"), FPS, (320, 240)
-    )
-    for index in range(FRAMES):
-        writer.write(np.full((240, 320, 3), index * 8, dtype=np.uint8))
+def write_video(path, fps=FPS, size=(320, 240), frames=FRAMES):
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), fps, size)
+    for index in range(frames):
+        writer.write(np.full((size[1], size[0], 3), index * 8, dtype=np.uint8))
     writer.release()
     return str(path)
 
 
 @pytest.fixture
-def window(app, video_path, tmp_path, monkeypatch):
+def video_path(tmp_path):
+    return write_video(tmp_path / "clip.mp4")
+
+
+def make_window(tmp_path, video_path, monkeypatch):
     monkeypatch.setattr("src.pipeline.PersonDetector", FakeDetector)
     config = {
         "roi": [[0, 0], [200, 0], [200, 200], [0, 200]],
@@ -58,6 +61,19 @@ def window(app, video_path, tmp_path, monkeypatch):
     save_config(config_path, config)
     win = MainWindow(video_path, config, str(config_path), str(tmp_path / "out"))
     win.show()
+    return win
+
+
+@pytest.fixture
+def window(app, video_path, tmp_path, monkeypatch):
+    win = make_window(tmp_path, video_path, monkeypatch)
+    yield win
+    win.close()
+
+
+@pytest.fixture
+def empty_window(app, tmp_path, monkeypatch):
+    win = make_window(tmp_path, None, monkeypatch)
     yield win
     win.close()
 
@@ -177,7 +193,8 @@ def test_clear_view_resets_the_chart_and_shows_the_first_frame(app, window):
     assert not window.video_label.pixmap().isNull()
 
 
-def test_pause_stops_the_frames_and_resume_continues(app, window):
+def test_pause_stops_the_frames_and_resume_continues(app, window, monkeypatch):
+    monkeypatch.setattr(FakeDetector, "delay", 0.05)
     points = record_chart_points(window)
     window.start_button.click()
     assert wait_until(app, lambda: len(points) >= 2)
@@ -214,3 +231,121 @@ def test_chart_redraws_once_per_video_second(app):
         chart.add_point(index * 0.1, 1)
     assert redraws == [1, 11, 21, 31, 41]
     assert len(chart.timestamps) == 50
+
+
+def test_window_can_start_without_a_video(empty_window):
+    assert not empty_window.start_button.isEnabled()
+    assert not empty_window.edit_button.isEnabled()
+    assert empty_window.open_button.isEnabled()
+    assert "Open a video" in empty_window.video_label.text()
+
+
+def test_choosing_a_video_loads_it_and_enables_processing(empty_window, tmp_path):
+    other = write_video(tmp_path / "other.mp4", fps=25)
+    empty_window._ask_video_path = lambda: other
+    empty_window.open_button.click()
+    assert empty_window.source == other
+    assert empty_window.video_name_label.text() == "other.mp4"
+    assert "Source video: 25.00 fps" in empty_window.fps_label.text()
+    assert empty_window.start_button.isEnabled()
+
+
+def test_cancelling_the_dialog_keeps_the_current_video(window):
+    current = window.source
+    window._ask_video_path = lambda: ""
+    window.open_button.click()
+    assert window.source == current
+
+
+def test_an_invalid_file_keeps_the_current_video(window, tmp_path):
+    broken = tmp_path / "broken.mp4"
+    broken.write_text("not a video")
+    current = window.source
+    window._ask_video_path = lambda: str(broken)
+    window.open_button.click()
+    assert window.source == current
+    assert "Error" in window.status_label.text()
+    assert window.start_button.isEnabled()
+
+
+def test_changing_video_clears_the_chart_and_leaves_zone_editing(window, tmp_path):
+    other = write_video(tmp_path / "other.mp4")
+    window.edit_button.setChecked(True)
+    window.chart.add_point(0.0, 3)
+    window._ask_video_path = lambda: other
+    window.open_button.click()
+    assert window.chart.timestamps == []
+    assert not window.edit_button.isChecked()
+
+
+def test_the_video_cannot_be_changed_while_processing(app, window, tmp_path):
+    window.start_button.click()
+    assert not window.open_button.isEnabled()
+    other = write_video(tmp_path / "other.mp4")
+    window._ask_video_path = lambda: other
+    window.choose_video()
+    assert window.source != other
+    assert wait_until(app, lambda: "finished" in window.fps_label.text())
+    assert window.open_button.isEnabled()
+
+
+def test_results_folder_is_named_after_the_chosen_video(app, empty_window, tmp_path):
+    other = write_video(tmp_path / "street.mp4")
+    empty_window._ask_video_path = lambda: other
+    empty_window.open_button.click()
+    empty_window.start_button.click()
+    assert wait_until(app, lambda: "finished" in empty_window.fps_label.text())
+    assert empty_window.worker.run_dir.name.startswith("street_")
+
+
+def test_webcam_button_loads_a_live_source(empty_window, fake_camera):
+    empty_window.webcam_button.click()
+    assert empty_window.source == 0
+    assert empty_window.is_live
+    assert "webcam" in empty_window.video_name_label.text().lower()
+    assert "webcam" in empty_window.fps_label.text().lower()
+    assert empty_window.start_button.isEnabled()
+
+
+def test_unavailable_webcam_shows_an_error_and_keeps_start_disabled(
+    empty_window, fake_camera
+):
+    fake_camera.broken_indexes = {0}
+    empty_window.webcam_button.click()
+    assert "Could not open camera 0" in empty_window.status_label.text()
+    assert empty_window.source is None
+    assert not empty_window.start_button.isEnabled()
+
+
+def test_webcam_runs_until_stop_and_uses_real_time(app, empty_window, fake_camera):
+    fake_camera.delay = 0.06
+    empty_window.webcam_button.click()
+    points = record_chart_points(empty_window)
+    empty_window.start_button.click()
+    assert empty_window.stop_button.isEnabled()
+    assert not empty_window.webcam_button.isEnabled()
+    assert wait_until(app, lambda: len(points) >= 12)
+    assert empty_window._is_running()
+    empty_window.stop_button.click()
+    assert wait_until(app, lambda: "finished" in empty_window.fps_label.text())
+    assert not empty_window.stop_button.isEnabled()
+    assert empty_window.chart.timestamps == []
+
+    run_dir = empty_window.worker.run_dir
+    assert run_dir.name.startswith("webcam_")
+    times = [time_s for time_s, _ in points]
+    assert times == sorted(times)
+    # Frames arrive every ~60 ms, while frame index / 30 fps would say ~33 ms.
+    assert times[-1] > 1.5 * (len(times) - 1) / 30
+    assert (run_dir / "csv" / "series.csv").exists()
+    assert (run_dir / "charts" / "occupancy.png").exists()
+
+
+def test_stop_ends_a_video_file_run_early(app, window, monkeypatch):
+    monkeypatch.setattr(FakeDetector, "delay", 0.05)
+    points = record_chart_points(window)
+    window.start_button.click()
+    assert wait_until(app, lambda: len(points) >= 2)
+    window.stop_button.click()
+    assert wait_until(app, lambda: not window._is_running())
+    assert len(points) < FRAMES

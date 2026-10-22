@@ -23,7 +23,7 @@ class FakeDetector:
         return list(FakeDetector.boxes)
 
 
-def make_config(stride=1, processing_width=None):
+def make_config(stride=1, processing_width=None, min_overlap_percent=None):
     detection = {"model": "fake.pt", "confidence_threshold": 0.4}
     if stride != 1:
         detection["stride"] = stride
@@ -38,6 +38,8 @@ def make_config(stride=1, processing_width=None):
         "clip": {"seconds_before": 0.2, "seconds_after": 0.2},
         "detection": detection,
     }
+    if min_overlap_percent is not None:
+        config["counting"] = {"min_overlap_percent": min_overlap_percent}
     if processing_width is not None:
         config["processing"] = {"width": processing_width}
     return config
@@ -137,3 +139,28 @@ def test_a_width_of_zero_disables_the_downscale(tmp_path):
     with Pipeline(config, fps=10, run_dir=tmp_path, frame_width=400) as pipeline:
         result = pipeline.process(big_frame, 0)
     assert result.annotated_frame.shape == (300, 400, 3)
+
+
+def test_measured_times_are_logged_instead_of_frame_over_fps(tmp_path):
+    with Pipeline(make_config(), fps=30, run_dir=tmp_path) as pipeline:
+        for index in range(6):
+            pipeline.process(make_frame(), index, time_s=index * 0.5)
+    with open(tmp_path / "csv" / "series.csv", newline="") as file:
+        rows = list(csv.DictReader(file))
+    assert [float(row["timestamp"]) for row in rows] == [0, 0.5, 1, 1.5, 2, 2.5]
+    with open(tmp_path / "csv" / "events.csv", newline="") as file:
+        events = list(csv.DictReader(file))
+    assert events[0]["start_time"] == "0.5"
+    assert events[0]["end_time"] == "2.5"
+
+
+def test_overlap_percentage_from_the_config_decides_who_is_counted(tmp_path):
+    # Half of this box is inside the 100x100 zone.
+    FakeDetector.boxes = [(50, 10, 150, 50, 0.9)]
+    counts = {}
+    for percent in (40, 60):
+        run_dir = tmp_path / str(percent)
+        config = make_config(min_overlap_percent=percent)
+        with Pipeline(config, fps=10, run_dir=run_dir) as pipeline:
+            counts[percent] = pipeline.process(make_frame(), 0).count
+    assert counts == {40: 1, 60: 0}

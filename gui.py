@@ -8,7 +8,7 @@ from src.gui.main_window import MainWindow
 
 
 def main():
-    args = parse_args()
+    args = parse_args(video_required=False)
     try:
         config = load_config(args.config)
     except PersonDetectorError as e:

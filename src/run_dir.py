@@ -2,6 +2,7 @@ from datetime import datetime
 from pathlib import Path
 
 
-def make_run_dir(output_base, video_path):
+def make_run_dir(output_base, source):
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    return Path(output_base) / f"{Path(video_path).stem}_{timestamp}"
+    name = "webcam" if isinstance(source, int) else Path(source).stem
+    return Path(output_base) / f"{name}_{timestamp}"

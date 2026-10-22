@@ -9,7 +9,7 @@ from src.enums.violation_event import ViolationEvent
 from src.metrics_logger import MetricsLogger
 from src.overlay import draw_overlay
 from src.person_detector import DEFAULT_THREADS, PersonDetector
-from src.redzone import RedZone
+from src.redzone import DEFAULT_MIN_OVERLAP_PERCENT, RedZone
 from src.video_reader import VideoReader
 from src.violation import ViolationDetector
 
@@ -28,6 +28,7 @@ class FrameResult:
 class Pipeline:
     def __init__(self, config, fps, run_dir, frame_width=None):
         self.run_dir = Path(run_dir)
+        self.fps = fps
         self.limit = config["person_limit"]
         violation = config["violation"]
         clip = config["clip"]
@@ -41,7 +42,10 @@ class Pipeline:
             self.working_width = working_width
 
         roi = [[round(x * self.scale), round(y * self.scale)] for x, y in config["roi"]]
-        self.zone = RedZone(roi)
+        counting = config.get("counting", {})
+        self.zone = RedZone(
+            roi, counting.get("min_overlap_percent", DEFAULT_MIN_OVERLAP_PERCENT)
+        )
         self.detector = PersonDetector(
             detection["model"],
             detection["confidence_threshold"],
@@ -65,7 +69,14 @@ class Pipeline:
         )
         self.violation_count = 0
 
-    def process(self, frame, frame_index):
+    def process(self, frame, frame_index, time_s=None):
+        """Process one frame. time_s is its time in seconds in the stream.
+
+        Without it the time is frame_index / fps, which is right for video files.
+        Live sources pass the measured time because they run slower than their fps.
+        """
+        if time_s is None:
+            time_s = frame_index / self.fps
         if self.working_width:
             size = (self.working_width, round(frame.shape[0] * self.scale))
             frame = cv2.resize(frame, size, interpolation=cv2.INTER_LINEAR)
@@ -79,7 +90,7 @@ class Pipeline:
         annotated = draw_overlay(
             frame, detections, self.zone, count, self.limit, in_violation
         )
-        self.recorder.add_frame(annotated)
+        self.recorder.add_frame(annotated, time_s)
 
         if event is ViolationEvent.STARTED:
             self.violation_count += 1
@@ -87,12 +98,12 @@ class Pipeline:
                 self.run_dir / "clips" / f"violation_{self.violation_count:03d}.mp4"
             )
             self.recorder.start(clip_path)
-            self.logger.start_violation(frame_index, clip_path)
+            self.logger.start_violation(frame_index, clip_path, time_s)
 
-        self.logger.log_frame(frame_index, count, in_violation)
+        self.logger.log_frame(frame_index, count, in_violation, time_s)
 
         if event is ViolationEvent.ENDED:
-            self.logger.end_violation(frame_index)
+            self.logger.end_violation(frame_index, time_s)
 
         return FrameResult(detections, count, event, in_violation, annotated)
 

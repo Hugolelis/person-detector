@@ -3,12 +3,11 @@ detection:
   confidence_threshold: 0.75
   threads: 4
 roi:
-- [1587, 1068]
-- [3094, 1151]
-- [3834, 1465]
-- [3793, 2080]
-- [1031, 2111]
-person_limit: 4
+- [97, 186]
+- [559, 142]
+- [608, 394]
+- [95, 442]
+person_limit: 3
 violation:
   frames_to_confirm_start: 10
   frames_to_confirm_end: 10
@@ -16,3 +15,5 @@ violation:
 clip:
   seconds_before: 2
   seconds_after: 3
+counting:
+  min_overlap_percent: 30
