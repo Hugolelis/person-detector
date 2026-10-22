@@ -1,20 +1,17 @@
 detection:
   model: yolov8n.pt
   confidence_threshold: 0.4
-  
 roi:
-  - [1000, 600]
-  - [3500, 600]
-  - [3500, 2100]
-  - [1000, 2100]
-
-person_limit: 2
-
+- [1647, 1230]
+- [3111, 1170]
+- [3837, 1515]
+- [3735, 2145]
+- [1008, 2100]
+person_limit: 3
 violation:
   frames_to_confirm_start: 10
   frames_to_confirm_end: 10
   cooldown_frames: 15
-
 clip:
   seconds_before: 2
   seconds_after: 3
