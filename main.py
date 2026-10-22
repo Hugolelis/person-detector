@@ -1,9 +1,10 @@
 import argparse
-from datetime import datetime
-from pathlib import Path
+import sys
 
 from src.config_loader import load_config
+from src.errors.base import PersonDetectorError
 from src.pipeline import run_pipeline
+from src.run_dir import make_run_dir
 
 
 def parse_args():
@@ -20,16 +21,15 @@ def parse_args():
     return parser.parse_args()
 
 
-def make_run_dir(output_base, video_path):
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    return Path(output_base) / f"{Path(video_path).stem}_{timestamp}"
-
-
 def main():
     args = parse_args()
-    config = load_config(args.config)
-    run_dir = make_run_dir(args.output, args.video)
-    run_pipeline(args.video, config, run_dir)
+    try:
+        config = load_config(args.config)
+        run_dir = make_run_dir(args.output, args.video)
+        run_pipeline(args.video, config, run_dir)
+    except PersonDetectorError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

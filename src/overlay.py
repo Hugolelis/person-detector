@@ -1,19 +1,31 @@
 import cv2
+import numpy as np
 
 ZONE_COLOR = (0, 0, 255)
 BOX_COLOR = (0, 255, 0)
 ALERT_COLOR = (0, 0, 255)
 TEXT_COLOR = (255, 255, 255)
+POINT_COLOR = (0, 255, 255)
+
+
+def _line_thickness(frame):
+    return max(2, frame.shape[1] // 640)
+
 
 def draw_zone(frame, zone):
-    thickness = max(2, frame.shape[1] // 640)
+    thickness = _line_thickness(frame)
     cv2.polylines(
         frame, [zone.polygon], isClosed=True, color=ZONE_COLOR, thickness=thickness
     )
 
 
-def _line_thickness(frame):
-    return max(2, frame.shape[1] // 640)
+def draw_zone_preview(frame, points):
+    thickness = _line_thickness(frame)
+    for point in points:
+        cv2.circle(frame, tuple(point), thickness * 3, POINT_COLOR, -1)
+    if len(points) >= 2:
+        polygon = np.array(points, dtype=np.int32)
+        cv2.polylines(frame, [polygon], len(points) >= 3, ZONE_COLOR, thickness)
 
 
 def draw_detections(frame, detections):
