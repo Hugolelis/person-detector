@@ -116,7 +116,7 @@ With **Depth view** on, a second panel shows a depth map next to the video. Ever
 
 ## Architecture & Design Decisions
 
-![Usage flow](diagram/PersonDetectorUsageFlow.png)
+![Usage flow](docs/PersonDetectorUsageFlow.png)
 
 ```
 .
@@ -158,8 +158,8 @@ With **Depth view** on, a second panel shows a depth map next to the video. Ever
 ├── scripts/
 │   └── tune_parameters.py        offline study of confidence and debounce
 ├── tests/                        mirrors the layout of src/
-├── docs/                         README assets
-└── diagram/                      usage flow
+├── docs/                         images shown in this README
+└── diagram/                      editable SVG source of the usage flow
 ```
 
 **Why this shape:** the folders follow the question each piece answers: `detection` decides what is in a frame, `depth` ranks who is closest, `video` moves frames in and out, `reporting` writes what a run leaves behind. The window is split the same way: `main_window.py` only builds the layout and connects signals, while the panels, the speed readout, the zone editor state and the source preview each live in their own small module and can be tested without opening a window. The frame is reduced once, on entry, so detection, drawing, the clip buffer and the window all work at 1280 pixels wide instead of repeating 4K operations. `Pipeline.process` handles exactly one frame and returns the result, so the CLI loop and the window's worker thread share the same logic instead of duplicating it. The debounce lives in its own class that only sees integer counts, which makes it testable with made-up sequences and no model. No class reads the YAML on its own: the entry points load the config and hand plain values down, so everything can be tested without files. Errors derive from one base exception, so the entry points catch every expected failure in a single `except` and let real bugs surface with a full traceback. Counting uses the share of the box inside the zone instead of a single point, so a person half in and half out is not decided by one pixel. The default is a low 30% on purpose: the zone is drawn on the ground, so for someone standing inside it, only the lower part of their box overlaps it. Raise it to be stricter, lower it to count anyone touching the zone.
