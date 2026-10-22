@@ -35,7 +35,8 @@ torchvision = {source = "pytorch-cpu"}
 
 [dependency-groups]
 dev = [
-    "ruff (>=0.17.1,<0.18.0)"
+    "ruff (>=0.17.1,<0.18.0)",
+    "pytest (>=9.1.1,<10.0.0)"
 ]
 
 [tool.ruff]
@@ -45,3 +46,7 @@ src = ["src"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
