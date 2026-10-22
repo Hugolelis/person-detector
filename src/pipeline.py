@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from pathlib import Path
 
 from src.chart import plot_occupancy
@@ -11,58 +12,91 @@ from src.video_reader import VideoReader
 from src.violation import ViolationDetector
 
 
+@dataclass
+class FrameResult:
+    detections: list
+    count: int
+    event: ViolationEvent | None
+    in_violation: bool
+    annotated_frame: object
+
+
+class Pipeline:
+    def __init__(self, config, fps, run_dir):
+        self.run_dir = Path(run_dir)
+        self.limit = config["person_limit"]
+        violation = config["violation"]
+        clip = config["clip"]
+        detection = config["detection"]
+
+        self.zone = RedZone(config["roi"])
+        self.detector = PersonDetector(
+            detection["model"], detection["confidence_threshold"]
+        )
+        self.violation_detector = ViolationDetector(
+            person_limit=self.limit,
+            frames_to_confirm_start=violation["frames_to_confirm_start"],
+            frames_to_confirm_end=violation["frames_to_confirm_end"],
+            cooldown_frames=violation["cooldown_frames"],
+        )
+        self.logger = MetricsLogger(self.run_dir / "csv", fps)
+        self.recorder = ClipRecorder(
+            fps, clip["seconds_before"], clip["seconds_after"]
+        )
+        self.violation_count = 0
+
+    def process(self, frame, frame_index):
+        detections = self.detector.detect(frame)
+        count = self.zone.count_people(detections)
+        event = self.violation_detector.update(count)
+        in_violation = self.violation_detector.in_violation
+
+        annotated = draw_overlay(
+            frame, detections, self.zone, count, self.limit, in_violation
+        )
+        self.recorder.add_frame(annotated)
+
+        if event is ViolationEvent.STARTED:
+            self.violation_count += 1
+            clip_path = (
+                self.run_dir / "clips" / f"violation_{self.violation_count:03d}.mp4"
+            )
+            self.recorder.start(clip_path)
+            self.logger.start_violation(frame_index, clip_path)
+
+        self.logger.log_frame(frame_index, count, in_violation)
+
+        if event is ViolationEvent.ENDED:
+            self.logger.end_violation(frame_index)
+
+        return FrameResult(detections, count, event, in_violation, annotated)
+
+    def plot_chart(self):
+        plot_occupancy(
+            self.run_dir / "csv" / "series.csv",
+            self.run_dir / "charts" / "occupancy.png",
+            self.limit,
+        )
+
+    def close(self):
+        self.recorder.close()
+        self.logger.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
+
 def run_pipeline(video_path, config, run_dir):
-    run_dir = Path(run_dir)
-    limit = config["person_limit"]
-    violation = config["violation"]
-    clip = config["clip"]
-    detection = config["detection"]
-
-    zone = RedZone(config["roi"])
-    detector = PersonDetector(detection["model"], detection["confidence_threshold"])
-    violation_detector = ViolationDetector(
-        person_limit=limit,
-        frames_to_confirm_start=violation["frames_to_confirm_start"],
-        frames_to_confirm_end=violation["frames_to_confirm_end"],
-        cooldown_frames=violation["cooldown_frames"],
-    )
-
     with (
         VideoReader(video_path) as reader,
-        MetricsLogger(run_dir / "csv", reader.fps) as logger,
+        Pipeline(config, reader.fps, run_dir) as pipeline,
     ):
-        recorder = ClipRecorder(
-            reader.fps, clip["seconds_before"], clip["seconds_after"]
-        )
-        violation_count = 0
-
         for frame_index, frame in enumerate(reader.frames()):
-            detections = detector.detect(frame)
-            count = zone.count_people(detections)
-            event = violation_detector.update(count)
-            in_violation = violation_detector.in_violation
-
-            annotated = draw_overlay(
-                    frame, detections, zone, count, limit, in_violation
-                )
-            recorder.add_frame(annotated)
-
-            if event is ViolationEvent.STARTED:
-                violation_count += 1
-                clip_path = run_dir / "clips" / f"violation_{violation_count:03d}.mp4"
-                recorder.start(clip_path)
-                logger.start_violation(frame_index, clip_path)
-
-            logger.log_frame(frame_index, count, in_violation)
-
-            if event is ViolationEvent.ENDED:
-                logger.end_violation(frame_index)
-
+            result = pipeline.process(frame, frame_index)
             if frame_index % 50 == 0:
-                print(f"frame {frame_index}: {count} people in zone")
+                print(f"frame {frame_index}: {result.count} people in zone")
 
-    plot_occupancy(
-        run_dir / "csv" / "series.csv",
-        run_dir / "charts" / "occupancy.png",
-        limit,
-    )
+    pipeline.plot_chart()

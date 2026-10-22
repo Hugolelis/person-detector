@@ -59,3 +59,8 @@ class ClipRecorder:
         for frame in self.buffer:
             self.writer.write(frame)
         self.frames_remaining = self.frames_after
+
+    def close(self):
+        if self.writer is not None:
+            self.writer.release()
+            self.writer = None
