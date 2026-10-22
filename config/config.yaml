@@ -1,18 +1,13 @@
 detection:
   model: yolov8n.pt
-  confidence_threshold: 0.4
+  confidence_threshold: 0.75
   threads: 4
 roi:
-- [3086, 1192]
-- [3784, 1485]
-- [3838, 2127]
-- [1253, 2109]
-- [1592, 1371]
-- [1866, 1320]
-- [1911, 1252]
-- [1926, 1178]
-- [1938, 1135]
-- [3060, 1166]
+- [1587, 1068]
+- [3094, 1151]
+- [3834, 1465]
+- [3793, 2080]
+- [1031, 2111]
 person_limit: 4
 violation:
   frames_to_confirm_start: 10

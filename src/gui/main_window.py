@@ -219,7 +219,14 @@ class MainWindow(QMainWindow):
                 f"finished, {describe_speed(average, self.video_fps)} on average "
                 f"over {self.fps_meter.frames} frames"
             )
+        if not self.status_label.text().startswith("Error"):
+            self.status_label.setText(f"Finished. Results in {self.worker.run_dir}")
+        self.clear_view()
         self._update_controls()
+
+    def clear_view(self):
+        self.chart.reset()
+        self._show_zone_preview(self.config["roi"])
 
     def toggle_calibration(self, checked):
         self.calibrating = checked

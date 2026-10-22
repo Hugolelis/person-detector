@@ -137,7 +137,7 @@ The same pipeline in the desktop window: live video with detections, live occupa
 └── diagram/                    usage flow
 ```
 
-**Why this shape:** `Pipeline.process` handles exactly one frame and returns the result, so the CLI loop and the window's worker thread share the same logic instead of duplicating it. The debounce lives in its own class that only sees integer counts, which makes it testable with made-up sequences and no model. No class reads the YAML on its own: the entry points load the config and hand plain values down, so everything can be tested without files. Errors derive from one base exception, so the entry points catch every expected failure in a single `except` and let real bugs surface with a full traceback. The feet rule exists because the zone represents an area on the ground, and a box center would count someone standing in front of it.
+**Why this shape:** the frame is reduced once, on entry, so detection, drawing, the clip buffer and the window all work at 1280 pixels wide instead of repeating 4K operations. `Pipeline.process` handles exactly one frame and returns the result, so the CLI loop and the window's worker thread share the same logic instead of duplicating it. The debounce lives in its own class that only sees integer counts, which makes it testable with made-up sequences and no model. No class reads the YAML on its own: the entry points load the config and hand plain values down, so everything can be tested without files. Errors derive from one base exception, so the entry points catch every expected failure in a single `except` and let real bugs surface with a full traceback. The feet rule exists because the zone represents an area on the ground, and a box center would count someone standing in front of it.
 
 **Known limitations:**
 - YOLO on a CPU is the bottleneck: expect a few frames per second on 4K video, not real time.
@@ -232,6 +232,7 @@ Press **Start**. The video plays with the detections, the chart grows below it, 
 | `detection.confidence_threshold` | Minimum confidence to keep a detection |
 | `detection.threads` | PyTorch CPU threads. Use about the number of physical cores |
 | `detection.stride` | *Optional.* Run YOLO every N frames and reuse the last boxes in between (default `1`). Counting and debounce still run on every frame |
+| `processing.width` | *Optional.* Frames wider than this are reduced once, on entry (default `1280`), and everything after runs at that size. `roi` stays in original-frame pixels and is scaled automatically. `0` keeps the original size |
 | `roi` | Zone polygon, a list of `[x, y]` points in the pixels of the original frame |
 | `person_limit` | A violation needs a count strictly **above** this value |
 | `violation.frames_to_confirm_start` | Consecutive frames above the limit to start a violation |
@@ -266,7 +267,7 @@ poetry run ruff check .    # lint
 poetry run ruff format .   # format
 ```
 
-The tests cover what does not need the model: zone counting, the debounce state machine, the chart bars and axes, the mapping of window clicks to frame pixels, and the pipeline using a fake detector.
+The tests cover what does not need the model: zone counting, the debounce state machine, the chart bars and axes, the mapping of window clicks to frame pixels, the pipeline using a fake detector, and the window itself, driven without a screen with a generated video (zone editing, start, pause, finish and close).
 
 `scripts/tune_parameters.py` runs the detector once, caches the result, and evaluates confidence thresholds and debounce settings offline. A larger model runs on a sample of frames and serves as the reference for the count error.
 

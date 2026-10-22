@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
 
+import cv2
 from src.chart import plot_occupancy
 from src.clip_recorder import ClipRecorder
 from src.enums.violation_event import ViolationEvent
@@ -11,6 +12,8 @@ from src.person_detector import DEFAULT_THREADS, PersonDetector
 from src.redzone import RedZone
 from src.video_reader import VideoReader
 from src.violation import ViolationDetector
+
+DEFAULT_WORKING_WIDTH = 1280
 
 
 @dataclass
@@ -23,14 +26,22 @@ class FrameResult:
 
 
 class Pipeline:
-    def __init__(self, config, fps, run_dir):
+    def __init__(self, config, fps, run_dir, frame_width=None):
         self.run_dir = Path(run_dir)
         self.limit = config["person_limit"]
         violation = config["violation"]
         clip = config["clip"]
         detection = config["detection"]
 
-        self.zone = RedZone(config["roi"])
+        working_width = config.get("processing", {}).get("width", DEFAULT_WORKING_WIDTH)
+        self.scale = 1.0
+        self.working_width = None
+        if frame_width and working_width and frame_width > working_width:
+            self.scale = working_width / frame_width
+            self.working_width = working_width
+
+        roi = [[round(x * self.scale), round(y * self.scale)] for x, y in config["roi"]]
+        self.zone = RedZone(roi)
         self.detector = PersonDetector(
             detection["model"],
             detection["confidence_threshold"],
@@ -45,10 +56,19 @@ class Pipeline:
             cooldown_frames=violation["cooldown_frames"],
         )
         self.logger = MetricsLogger(self.run_dir / "csv", fps)
-        self.recorder = ClipRecorder(fps, clip["seconds_before"], clip["seconds_after"])
+        recorder_width = self.working_width or frame_width
+        self.recorder = ClipRecorder(
+            fps,
+            clip["seconds_before"],
+            clip["seconds_after"],
+            **({"width": recorder_width} if recorder_width else {}),
+        )
         self.violation_count = 0
 
     def process(self, frame, frame_index):
+        if self.working_width:
+            size = (self.working_width, round(frame.shape[0] * self.scale))
+            frame = cv2.resize(frame, size, interpolation=cv2.INTER_LINEAR)
         if frame_index % self.detection_stride == 0:
             self.last_detections = self.detector.detect(frame)
         detections = self.last_detections
@@ -97,7 +117,7 @@ class Pipeline:
 def run_pipeline(video_path, config, run_dir):
     with (
         VideoReader(video_path) as reader,
-        Pipeline(config, reader.fps, run_dir) as pipeline,
+        Pipeline(config, reader.fps, run_dir, frame_width=reader.width) as pipeline,
     ):
         started = perf_counter()
         frames = 0

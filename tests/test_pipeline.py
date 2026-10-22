@@ -5,24 +5,29 @@ import pytest
 from src.enums.violation_event import ViolationEvent
 from src.pipeline import Pipeline
 
+DEFAULT_BOXES = [(10, 10, 20, 40, 0.9), (60, 10, 70, 40, 0.8)]
+
 
 class FakeDetector:
     instances = []
+    boxes = DEFAULT_BOXES
 
     def __init__(self, *args, **kwargs):
         self.calls = 0
+        self.seen_shapes = []
         FakeDetector.instances.append(self)
 
     def detect(self, frame):
         self.calls += 1
-        return [(10, 10, 20, 40, 0.9), (60, 10, 70, 40, 0.8)]
+        self.seen_shapes.append(frame.shape)
+        return list(FakeDetector.boxes)
 
 
-def make_config(stride=1):
+def make_config(stride=1, processing_width=None):
     detection = {"model": "fake.pt", "confidence_threshold": 0.4}
     if stride != 1:
         detection["stride"] = stride
-    return {
+    config = {
         "roi": [[0, 0], [100, 0], [100, 100], [0, 100]],
         "person_limit": 1,
         "violation": {
@@ -33,11 +38,15 @@ def make_config(stride=1):
         "clip": {"seconds_before": 0.2, "seconds_after": 0.2},
         "detection": detection,
     }
+    if processing_width is not None:
+        config["processing"] = {"width": processing_width}
+    return config
 
 
 @pytest.fixture(autouse=True)
 def fake_detector(monkeypatch):
     FakeDetector.instances = []
+    FakeDetector.boxes = DEFAULT_BOXES
     monkeypatch.setattr("src.pipeline.PersonDetector", FakeDetector)
 
 
@@ -94,3 +103,37 @@ def test_stride_still_counts_every_frame(tmp_path):
     with Pipeline(make_config(stride=3), fps=10, run_dir=tmp_path) as pipeline:
         results = [pipeline.process(make_frame(), index) for index in range(4)]
     assert [result.count for result in results] == [2, 2, 2, 2]
+
+
+def test_large_frames_are_downscaled_once_before_everything_else(tmp_path):
+    big_frame = np.zeros((300, 400, 3), dtype=np.uint8)
+    config = make_config(processing_width=200)
+    with Pipeline(config, fps=10, run_dir=tmp_path, frame_width=400) as pipeline:
+        result = pipeline.process(big_frame, 0)
+    assert FakeDetector.instances[0].seen_shapes == [(150, 200, 3)]
+    assert result.annotated_frame.shape == (150, 200, 3)
+
+
+def test_zone_is_scaled_together_with_the_frame(tmp_path):
+    FakeDetector.boxes = [(150, 10, 160, 50, 0.9)]
+    big_frame = np.zeros((300, 400, 3), dtype=np.uint8)
+    config = make_config(processing_width=200)
+    config["roi"] = [[0, 0], [200, 0], [200, 200], [0, 200]]
+    with Pipeline(config, fps=10, run_dir=tmp_path, frame_width=400) as pipeline:
+        result = pipeline.process(big_frame, 0)
+    assert result.count == 0
+
+
+def test_frames_already_small_enough_are_left_alone(tmp_path):
+    config = make_config(processing_width=1280)
+    with Pipeline(config, fps=10, run_dir=tmp_path, frame_width=160) as pipeline:
+        pipeline.process(make_frame(), 0)
+    assert FakeDetector.instances[0].seen_shapes == [(120, 160, 3)]
+
+
+def test_a_width_of_zero_disables_the_downscale(tmp_path):
+    big_frame = np.zeros((300, 400, 3), dtype=np.uint8)
+    config = make_config(processing_width=0)
+    with Pipeline(config, fps=10, run_dir=tmp_path, frame_width=400) as pipeline:
+        result = pipeline.process(big_frame, 0)
+    assert result.annotated_frame.shape == (300, 400, 3)

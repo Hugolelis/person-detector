@@ -55,7 +55,9 @@ class VideoWorker(QThread):
         try:
             with (
                 VideoReader(self.video_path) as reader,
-                Pipeline(self.config, reader.fps, self.run_dir) as pipeline,
+                Pipeline(
+                    self.config, reader.fps, self.run_dir, frame_width=reader.width
+                ) as pipeline,
             ):
                 for frame_index, frame in enumerate(reader.frames()):
                     while self._paused and self._running:
