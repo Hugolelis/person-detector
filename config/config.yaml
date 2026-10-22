@@ -3,12 +3,15 @@ detection:
   confidence_threshold: 0.75
   threads: 4
 roi:
-- [398, 62]
-- [101, 180]
-- [113, 393]
-- [623, 464]
-- [606, 131]
-person_limit: 5
+- [1936, 1119]
+- [3051, 1155]
+- [3836, 1498]
+- [3816, 2097]
+- [1206, 2113]
+- [1471, 1577]
+- [1609, 1380]
+- [1762, 1305]
+person_limit: 2
 violation:
   frames_to_confirm_start: 10
   frames_to_confirm_end: 10
